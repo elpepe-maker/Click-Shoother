@@ -1604,9 +1604,21 @@
   function nextGalaxy() {
     galaxy++;
     roomsCleared = 0;
+
+    // Segunda oportunidad: si alguien cayo pero el grupo aguanto hasta
+    // llegar aqui (jefe derrotado), revive con media vida al entrar en el
+    // piso nuevo. No revive a mitad de sala, solo al cruzar de galaxia.
+    const revividos = [me, ally].filter(p => p && p.dead);
+    for (const p of revividos) {
+      p.dead = false;
+      p.hp = Math.round(p.maxHp * 0.5);
+    }
+
     const start = generateMap();
     enterRoom(start, null);
+    for (const p of revividos) spawnParticles(p.x, p.y, p.color, 24); // ya en su sitio nuevo
     sfx('bossSpawn');
+    if (revividos.length) sfx('phaseUp');
     shockwaves.push({ x: LOGICAL_W / 2, y: LOGICAL_H / 2, r: 10, maxR: 700, life: 1.2, maxLife: 1.2, color: '#9fdcff' });
   }
 
