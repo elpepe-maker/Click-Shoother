@@ -504,6 +504,7 @@
         <span class="stat">Galaxia: <b id="galaxy">1</b></span>
         <span class="stat">Salas: <b id="rooms">0</b></span>
         <span class="stat">Mejoras: <b id="level">0</b></span>
+        <span class="stat" id="ability-stat" style="display:none;">Habilidad: <b id="ability-name"></b></span>
       </div>
       <div id="bars">
         <div id="healthbar-outer"><div id="healthbar-inner"></div></div>
@@ -655,6 +656,8 @@
   const galaxyEl = document.getElementById('galaxy');
   const roomsEl = document.getElementById('rooms');
   const levelEl = document.getElementById('level');
+  const abilityStat = document.getElementById('ability-stat');
+  const abilityNameEl = document.getElementById('ability-name');
   const healthInner = document.getElementById('healthbar-inner');
   const xpInner = document.getElementById('xpbar-inner');
   const allyBarOuter = document.getElementById('ally-bar-outer');
@@ -720,6 +723,22 @@
   // extra a otra) y dan solo una mejora en vez de tres a elegir de golpe.
   const RARITY_WEIGHTS_NORMAL = [['common', 80], ['rare', 14], ['epic', 4.5], ['legendary', 1.2], ['exotic', 0.3]];
   const RARITY_WEIGHTS_EXTRA = [['common', 20], ['rare', 40], ['epic', 25], ['legendary', 10], ['exotic', 5]];
+
+  // ---------- habilidades del jefe (dropeadas, no mejoras) ----------
+  // Solo una a la vez: coger una nueva pisa la que ya tenias, nunca se
+  // acumulan (ver la recogida de "pickups" en hostTick). Son versiones mas
+  // flojas y pequenas de ataques del propio jefe, salvo el escudo, que es
+  // puramente defensivo y no existe como ataque del jefe.
+  const ABILITY_TYPES = ['laser', 'meteor', 'shield'];
+  const ABILITY_META = {
+    laser:  { label: 'Láser',   color: '#4de1ff' },
+    meteor: { label: 'Meteoro', color: '#ff9a3c' },
+    shield: { label: 'Escudo',  color: '#7cf0ff' },
+  };
+  // Medio angulo del arco que cubre el escudo (mirando hacia donde apunta
+  // el jugador): 55 grados a cada lado, asi deja los flancos y la espalda
+  // sin cubrir a proposito.
+  const SHIELD_HALF_ANGLE = Math.PI * (55 / 180);
 
   function rollRarity(weights) {
     const total = weights.reduce((sum, [, w]) => sum + w, 0);
@@ -1163,6 +1182,15 @@
         [440, 349, 262, 196].forEach((f, i) =>
           tone({ type: 'triangle', f0: f, dur: 0.5, peak: 0.24, delay: i * 0.18 }));
       },
+      abilityGet() {
+        tone({ type: 'triangle', f0: 500, f1: 950, dur: 0.18, peak: 0.22 });
+        tone({ type: 'sine', f0: 1300, dur: 0.16, peak: 0.16, delay: 0.09 });
+      },
+      shieldBlock() {
+        if (throttled('shieldBlock', 60)) return;
+        tone({ type: 'square', f0: 700, f1: 1500, dur: 0.06, peak: 0.14 });
+        noise({ dur: 0.05, peak: 0.1, freq: 3500, filter: 'highpass' });
+      },
     };
   })();
 
@@ -1277,7 +1305,7 @@
   // codigo no sabe leer y salen fallos raros (portales que no se ven, barras
   // vacias...) sin ningun error en pantalla. Se avisa en el lobby.
   // Subir este numero al cambiar lo que viaja en buildSnapshot().
-  const GAME_VERSION = 'salas-5';
+  const GAME_VERSION = 'salas-6';
 
   function sameVersion(theirs) {
     return theirs === GAME_VERSION;
@@ -1310,7 +1338,7 @@
   // Solo estos tipos se pueden invocar desde el panel de espectador: una
   // lista blanca evita que un mensaje con basura ("enemyType": cualquier
   // cosa) haga explotar spawnEnemy() en pleno directo del anfitrion.
-  const SPEC_SPAWNABLE = ['grunt', 'fast', 'shooter', 'tank', 'bomber', 'sniper'];
+  const SPEC_SPAWNABLE = ['grunt', 'fast', 'shooter', 'tank', 'bomber', 'sniper', 'kamikaze', 'splitter'];
 
   // Si el canal de datos se satura o se cae, conn.send lanza una excepcion.
   // Sin proteger, esa excepcion sube hasta el bucle principal y mata el
@@ -1671,6 +1699,7 @@
       shootCooldown: 0, aim: 0, dead: false,
       name: info.name, color: SKIN_MAP[info.skin] ? SKIN_MAP[info.skin].color : '#3d5afe',
       projectile: PROJECTILE_MAP[info.projectile] ? info.projectile : 'bolt',
+      ability: null, abilityCd: 0, // habilidad dropeada por el jefe, ver ABILITY_TYPES
     };
   }
 
@@ -1751,6 +1780,14 @@
       ally2BarInner.style.width = (clamp(ally2.hp / ally2.maxHp, 0, 1) * 100) + '%';
     } else {
       ally2BarOuter.style.display = 'none';
+    }
+    if (me && me.ability) {
+      const meta = ABILITY_META[me.ability];
+      abilityStat.style.display = '';
+      abilityNameEl.textContent = meta ? meta.label : me.ability;
+      abilityNameEl.style.color = meta ? meta.color : '';
+    } else {
+      abilityStat.style.display = 'none';
     }
   }
 
@@ -1877,11 +1914,13 @@
     const roll = Math.random();
     let acc = 0;
     const table = [
-      { type: 'sniper',  chance: progress >= 6 ? 0.10 : 0 },
-      { type: 'bomber',  chance: progress >= 4 ? 0.14 : 0 },
-      { type: 'tank',    chance: progress >= 3 ? 0.12 : 0 },
-      { type: 'shooter', chance: progress >= 2 ? 0.16 : 0 },
-      { type: 'fast',    chance: progress >= 1 ? 0.26 : 0 },
+      { type: 'sniper',   chance: progress >= 6 ? 0.10 : 0 },
+      { type: 'splitter', chance: progress >= 5 ? 0.08 : 0 },
+      { type: 'bomber',   chance: progress >= 4 ? 0.14 : 0 },
+      { type: 'kamikaze', chance: progress >= 3 ? 0.12 : 0 },
+      { type: 'tank',     chance: progress >= 3 ? 0.12 : 0 },
+      { type: 'shooter',  chance: progress >= 2 ? 0.16 : 0 },
+      { type: 'fast',     chance: progress >= 1 ? 0.26 : 0 },
     ];
     for (const entry of table) {
       acc += entry.chance;
@@ -2453,23 +2492,7 @@
         if (b.pierce > 0) b.pierce--; else bullets.splice(j, 1);
 
         if (boss.hp <= 0) {
-          score += 500 * boss.tier;
-          spawnParticles(boss.x, boss.y, boss.color, 60);
-          sfx('bossDie');
-          sfx('bossMusicStop');
-          shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 600, life: 1.1, maxLife: 1.1, color: boss.accent });
-          // Recompensa: curacion y experiencia por derrotarlo.
-          for (let k = 0; k < 4; k++) {
-            pickups.push({
-              x: boss.x + rand(-60, 60),
-              y: boss.y + rand(-60, 60),
-              r: 8, life: 12, heal: 25,
-            });
-          }
-          boss = null;
-          beams.length = 0;
-          meteors.length = 0;
-          onBossDefeated();
+          killBoss();
           return;
         }
       }
@@ -2494,6 +2517,23 @@
       const ramp = clamp((beam.maxLife - beam.life) / 0.15, 0, 1);
       if (ramp < 1) continue;
 
+      // El laser del jugador (habilidad dropeada) es igual que el del jefe
+      // pero apunta al reves: hace dano a enemigos/jefe en vez de jugadores.
+      if (beam.owner === 'player') {
+        for (let j = enemies.length - 1; j >= 0; j--) {
+          const e = enemies[j];
+          if (distanceToRay(e.x, e.y, beam.x, beam.y, beam.angle) < beam.width * 0.5 + e.r) {
+            e.hp -= (beam.dmg || 14) * dt;
+            if (e.hp <= 0) killEnemy(e);
+          }
+        }
+        if (boss && distanceToRay(boss.x, boss.y, beam.x, beam.y, beam.angle) < beam.width * 0.5 + boss.r) {
+          boss.hp -= (beam.dmg || 14) * dt;
+          if (boss.hp <= 0) { killBoss(); return; }
+        }
+        continue;
+      }
+
       for (const p of activePlayers) {
         if (p.dead) continue;
         if (distanceToRay(p.x, p.y, beam.x, beam.y, beam.angle) < beam.width * 0.5 + p.r) {
@@ -2516,12 +2556,68 @@
         spawnParticles(m.x, m.y, m.color, 20);
         sfx('meteor');
 
-        for (const p of activePlayers) {
-          if (p.dead) continue;
-          if (dist(m.x, m.y, p.x, p.y) < m.radius + p.r) damagePlayer(p, m.dmg || 34);
+        // El meteoro del jugador (habilidad dropeada) es igual que el del
+        // jefe pero al reves: castiga a enemigos/jefe, no a jugadores.
+        if (m.owner === 'player') {
+          for (let j = enemies.length - 1; j >= 0; j--) {
+            const e = enemies[j];
+            if (dist(m.x, m.y, e.x, e.y) < m.radius + e.r) {
+              e.hp -= m.dmg || 24;
+              if (e.hp <= 0) killEnemy(e);
+            }
+          }
+          if (boss && dist(m.x, m.y, boss.x, boss.y) < m.radius + boss.r) {
+            boss.hp -= m.dmg || 24;
+            if (boss.hp <= 0) { killBoss(); meteors.splice(i, 1); return; }
+          }
+        } else {
+          for (const p of activePlayers) {
+            if (p.dead) continue;
+            if (dist(m.x, m.y, p.x, p.y) < m.radius + p.r) damagePlayer(p, m.dmg || 34);
+          }
         }
       }
       meteors.splice(i, 1);
+    }
+  }
+
+  // ---------- habilidades del jugador (dropeadas por el jefe) ----------
+  // El escudo es pasivo (se gestiona en las colisiones de arriba via
+  // inShieldArc, sin temporizador). El laser y el meteoro son automaticos:
+  // se disparan solos contra el enemigo mas cercano cada pocos segundos
+  // mientras el jugador lleve esa habilidad puesta, mas flojos y pequenos
+  // que la version del jefe.
+  function updatePlayerAbilities(dt, activePlayers) {
+    for (const p of activePlayers) {
+      if (p.dead || !p.ability || p.ability === 'shield') continue;
+
+      p.abilityCd -= dt;
+      if (p.abilityCd > 0) continue;
+
+      const target = nearestEnemyTarget(p.x, p.y);
+      if (!target) { p.abilityCd = 0.4; continue; }
+
+      if (p.ability === 'laser') {
+        p.abilityCd = 2.6;
+        const angle = Math.atan2(target.y - p.y, target.x - p.x);
+        const fireTimer = 0.45;
+        beams.push({
+          x: p.x, y: p.y, angle,
+          width: 9, life: fireTimer, maxLife: fireTimer,
+          color: ABILITY_META.laser.color, owner: 'player', dmg: 26,
+        });
+        sfx('laserFire');
+      } else if (p.ability === 'meteor') {
+        p.abilityCd = 3.2;
+        const warn = 0.8;
+        meteors.push({
+          x: clamp(target.x + rand(-40, 40), 40, LOGICAL_W - 40),
+          y: clamp(target.y + rand(-40, 40), 40, LOGICAL_H - 40),
+          radius: 55, dmg: 26, warn, maxWarn: warn, exploded: false,
+          color: ABILITY_META.meteor.color, owner: 'player',
+        });
+        sfx('telegraph');
+      }
     }
   }
 
@@ -2569,6 +2665,13 @@
       bomber:  { r: 14, speed: 105, hp: 20, dmg: 12, color: '#ff7b1a', score: 30, explodes: true },
       // Dispara rapido, preciso y desde muy lejos.
       sniper:  { r: 13, speed: 48,  hp: 24, dmg: 5,  color: '#4de1ff', score: 40, ranged: true, sniper: true },
+      // Pequeno y muy rapido, poquisima vida: la amenaza es que llegue vivo
+      // hasta el jugador, no que aguante disparos. Al tocar explota de golpe
+      // (mucho dano de una vez) y desaparece, no hace dano por segundo.
+      kamikaze: { r: 10, speed: 205, hp: 10, dmg: 34, color: '#ff3b6e', score: 20, kamikaze: true },
+      // Vida media; al morir se parte en dos crias pequenas y debiles que no
+      // vuelven a partirse (ver spawnSplitterBabies).
+      splitter: { r: 20, speed: 70,  hp: 46, dmg: 10, color: '#3cff8f', score: 35, splits: true },
     }[type];
 
     const scale = 1 + ((galaxy - 1) * 4 + roomsCleared) * 0.09;
@@ -2586,6 +2689,8 @@
       ranged: !!base.ranged,
       sniper: !!base.sniper,
       explodes: !!base.explodes,
+      kamikaze: !!base.kamikaze,
+      splits: !!base.splits,
       fireCd: rand(0.5, 1.5),
     });
   }
@@ -2604,6 +2709,39 @@
     spawnParticles(e.x, e.y, '#ff7b1a', 22);
     shockwaves.push({ x: e.x, y: e.y, r: 6, maxR: 120, life: 0.35, maxLife: 0.35, color: '#ff7b1a' });
     sfx('bomberExplode');
+  }
+
+  // Explosion del kamikaze al tocar a un jugador: un solo golpe fuerte, sin
+  // proyectiles (a diferencia del bomber, que estalla al morir por disparos
+  // y SI suelta metralla). Aqui el peligro es dejarlo llegar, no esquivar
+  // la explosion en si.
+  function explodeKamikaze(e) {
+    spawnParticles(e.x, e.y, e.color, 18);
+    shockwaves.push({ x: e.x, y: e.y, r: 6, maxR: 90, life: 0.3, maxLife: 0.3, color: e.color });
+    sfx('bomberExplode');
+  }
+
+  // Splitter: al morir, dos crias pequenas y debiles que no vuelven a
+  // partirse (isBaby evita una cadena infinita de particiones).
+  function spawnSplitterBabies(e) {
+    const scale = 1 + ((galaxy - 1) * 4 + roomsCleared) * 0.09;
+    const babyHp = 8 * scale * coopHpScale();
+    for (let i = 0; i < 2; i++) {
+      const ang = rand(0, Math.PI * 2);
+      enemies.push({
+        id: nextEnemyId++,
+        x: e.x + Math.cos(ang) * 14, y: e.y + Math.sin(ang) * 14,
+        type: 'splitterBaby',
+        r: 9, speed: 150,
+        hp: babyHp, maxHp: babyHp,
+        entered: true, // nace ya dentro del escenario, no hace falta que "entre"
+        dmg: 8,
+        color: '#7cffb0',
+        scoreVal: 8,
+        ranged: false, sniper: false, explodes: false, kamikaze: false, splits: false,
+        fireCd: 0,
+      });
+    }
   }
 
   // ---------- particles ----------
@@ -2675,6 +2813,73 @@
       if (d < bestD) { bestD = d; best = p; }
     }
     return best || activePlayers[0];
+  }
+
+  // El objetivo mas cercano para las habilidades del jugador: cualquier
+  // enemigo normal o, si esta mas cerca, el jefe/miniboss (el miniboss vive
+  // en el array enemies, asi que ya entra en el bucle de abajo).
+  function nearestEnemyTarget(x, y) {
+    let best = null, bestD = Infinity;
+    for (const e of enemies) {
+      const d = dist(x, y, e.x, e.y);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (boss) {
+      const d = dist(x, y, boss.x, boss.y);
+      if (d < bestD) { bestD = d; best = boss; }
+    }
+    return best;
+  }
+
+  // Consecuencias de derrotar al jefe: recompensas, sonido, y de paso una
+  // probabilidad de soltar una habilidad (ver ABILITY_TYPES). Se llama tanto
+  // si muere por balas normales como por una habilidad del propio jugador
+  // (laser/meteoro), asi la logica de "morir" vive en un solo sitio.
+  function killBoss() {
+    score += 500 * boss.tier;
+    spawnParticles(boss.x, boss.y, boss.color, 60);
+    sfx('bossDie');
+    sfx('bossMusicStop');
+    shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 600, life: 1.1, maxLife: 1.1, color: boss.accent });
+    // Recompensa: curacion y experiencia por derrotarlo.
+    for (let k = 0; k < 4; k++) {
+      pickups.push({ x: boss.x + rand(-60, 60), y: boss.y + rand(-60, 60), r: 8, life: 12, heal: 25 });
+    }
+    // 10% de soltar TAMBIEN una habilidad (laser/meteoro/escudo). Solo una a
+    // la vez: si el que la recoge ya tenia otra, la pierde (ver la recogida
+    // de pickups mas abajo).
+    if (Math.random() < 0.10) {
+      const abilityType = ABILITY_TYPES[Math.floor(Math.random() * ABILITY_TYPES.length)];
+      pickups.push({ x: boss.x, y: boss.y, r: 10, life: 20, ability: abilityType });
+    }
+    boss = null;
+    beams.length = 0;
+    meteors.length = 0;
+    onBossDefeated();
+  }
+
+  // Consecuencias de matar a un enemigo normal (no jefe): recompensa, sonido
+  // y casos especiales (bomber explota, splitter se parte). Se llama tanto
+  // desde las balas del jugador como desde sus habilidades.
+  function killEnemy(e) {
+    score += e.scoreVal;
+    spawnParticles(e.x, e.y, e.color, 14);
+    spawnPickup(e.x, e.y);
+    if (e.explodes) explodeBomber(e); else sfx('enemyDie');
+    if (e.splits) spawnSplitterBabies(e);
+    const idx = enemies.indexOf(e);
+    if (idx !== -1) enemies.splice(idx, 1);
+  }
+
+  // El escudo solo cubre un arco delante de hacia donde apunta el jugador
+  // (ver SHIELD_HALF_ANGLE): deja flancos y espalda sin cubrir a proposito.
+  function inShieldArc(p, threatX, threatY) {
+    if (p.ability !== 'shield') return false;
+    const angleToThreat = Math.atan2(threatY - p.y, threatX - p.x);
+    let diff = angleToThreat - p.aim;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    return Math.abs(diff) < SHIELD_HALF_ANGLE;
   }
 
   // ---------- host/solo simulation ----------
@@ -2753,6 +2958,7 @@
 
     // jefe
     updateBoss(dt, activePlayers);
+    updatePlayerAbilities(dt, activePlayers);
     updateBeams(dt, activePlayers);
     updateMeteors(dt, activePlayers);
     updateShockwaves(dt);
@@ -2798,10 +3004,28 @@
         e.y = clamp(e.y, e.r, canvas.height - e.r);
       }
 
-      // contact damage vs any alive player overlapping
-      for (const p of activePlayers) {
-        if (p.dead) continue;
-        if (dist(e.x, e.y, p.x, p.y) < e.r + p.r) damagePlayer(p, e.dmg * dt * 2.5);
+      // contact damage vs any alive player overlapping. El kamikaze es un
+      // caso aparte: un solo golpe fuerte y desaparece, no dano por segundo
+      // (ver explodeKamikaze). El escudo puede bloquear cualquiera de los
+      // dos casos si el jugador lo tiene puesto de cara a la amenaza.
+      if (e.kamikaze) {
+        let touched = false;
+        for (const p of activePlayers) {
+          if (p.dead) continue;
+          if (dist(e.x, e.y, p.x, p.y) < e.r + p.r) {
+            if (inShieldArc(p, e.x, e.y)) sfx('shieldBlock'); else damagePlayer(p, e.dmg);
+            touched = true;
+            break;
+          }
+        }
+        if (touched) { explodeKamikaze(e); enemies.splice(i, 1); continue; }
+      } else {
+        for (const p of activePlayers) {
+          if (p.dead) continue;
+          if (dist(e.x, e.y, p.x, p.y) < e.r + p.r && !inShieldArc(p, e.x, e.y)) {
+            damagePlayer(p, e.dmg * dt * 2.5);
+          }
+        }
       }
 
       // friendly bullets vs this enemy
@@ -2813,28 +3037,29 @@
           spawnParticles(b.x, b.y, e.color, 4);
           sfx('hit');
           if (b.pierce > 0) b.pierce--; else bullets.splice(j, 1);
-          if (e.hp <= 0) {
-            score += e.scoreVal;
-            spawnParticles(e.x, e.y, e.color, 14);
-            spawnPickup(e.x, e.y);
-            if (e.explodes) explodeBomber(e); else sfx('enemyDie');
-            enemies.splice(i, 1);
-          }
+          if (e.hp <= 0) killEnemy(e);
           break;
         }
       }
     }
 
-    // enemy bullets vs players
+    // enemy bullets vs players (el escudo las bloquea sin dano si vienen de
+    // cara a donde apunta el jugador)
     for (let i = bullets.length - 1; i >= 0; i--) {
       const b = bullets[i];
       if (b.friendly) continue;
       for (const p of activePlayers) {
         if (p.dead) continue;
         if (dist(b.x, b.y, p.x, p.y) < p.r + b.r) {
-          damagePlayer(p, b.dmg || 8);
-          bullets.splice(i, 1);
-          spawnParticles(p.x, p.y, '#3d5afe', 6);
+          if (inShieldArc(p, b.x, b.y)) {
+            bullets.splice(i, 1);
+            spawnParticles(b.x, b.y, ABILITY_META.shield.color, 6);
+            sfx('shieldBlock');
+          } else {
+            damagePlayer(p, b.dmg || 8);
+            bullets.splice(i, 1);
+            spawnParticles(p.x, p.y, '#3d5afe', 6);
+          }
           break;
         }
       }
@@ -2856,7 +3081,20 @@
       let picked = false;
       for (const p of activePlayers) {
         if (p.dead) continue;
-        if (dist(pk.x, pk.y, p.x, p.y) < pk.r + p.r) { p.hp = clamp(p.hp + pk.heal, 0, p.maxHp); picked = true; sfx('pickup'); break; }
+        if (dist(pk.x, pk.y, p.x, p.y) < pk.r + p.r) {
+          // No se acumulan: coger una habilidad nueva pisa la que ya tenias.
+          if (pk.ability) {
+            p.ability = pk.ability;
+            p.abilityCd = 0;
+            sfx('abilityGet');
+            spawnParticles(p.x, p.y, (ABILITY_META[pk.ability] || ABILITY_META.laser).color, 16);
+          } else {
+            p.hp = clamp(p.hp + pk.heal, 0, p.maxHp);
+            sfx('pickup');
+          }
+          picked = true;
+          break;
+        }
       }
       if (picked) { pickups.splice(i, 1); continue; }
       if (pk.life <= 0) pickups.splice(i, 1);
@@ -2894,9 +3132,9 @@
       t: 'state',
       // Se manda tambien la velocidad para que el cliente pueda predecir su
       // propio movimiento sin esperar al host.
-      me: { x: r1(me.x), y: r1(me.y), hp: r1(me.hp), maxHp: me.maxHp, aim: r2(me.aim), dead: me.dead, name: me.name, color: me.color, speed: r1(me.speed), r: me.r },
-      ally: ally ? { x: r1(ally.x), y: r1(ally.y), hp: r1(ally.hp), maxHp: ally.maxHp, aim: r2(ally.aim), dead: ally.dead, name: ally.name, color: ally.color, speed: r1(ally.speed), r: ally.r } : null,
-      ally2: ally2 ? { x: r1(ally2.x), y: r1(ally2.y), hp: r1(ally2.hp), maxHp: ally2.maxHp, aim: r2(ally2.aim), dead: ally2.dead, name: ally2.name, color: ally2.color, speed: r1(ally2.speed), r: ally2.r } : null,
+      me: { x: r1(me.x), y: r1(me.y), hp: r1(me.hp), maxHp: me.maxHp, aim: r2(me.aim), dead: me.dead, name: me.name, color: me.color, speed: r1(me.speed), r: me.r, ability: me.ability },
+      ally: ally ? { x: r1(ally.x), y: r1(ally.y), hp: r1(ally.hp), maxHp: ally.maxHp, aim: r2(ally.aim), dead: ally.dead, name: ally.name, color: ally.color, speed: r1(ally.speed), r: ally.r, ability: ally.ability } : null,
+      ally2: ally2 ? { x: r1(ally2.x), y: r1(ally2.y), hp: r1(ally2.hp), maxHp: ally2.maxHp, aim: r2(ally2.aim), dead: ally2.dead, name: ally2.name, color: ally2.color, speed: r1(ally2.speed), r: ally2.r, ability: ally2.ability } : null,
       // Arrays planos de numeros en vez de objetos: un objeto repite el nombre
       // de cada campo por cada elemento ("x","y","r","friendly","style"...),
       // lo que con cientos de balas multiplica el tamano del paquete.
@@ -2915,7 +3153,7 @@
         else if (b.color !== undefined && NET_COLOR_INDEX[b.color] !== undefined) style = -(2 + NET_COLOR_INDEX[b.color]);
         return [r1(b.x), r1(b.y), r1(b.vx), r1(b.vy), b.r, style];
       }),
-      pickups: pickups.map(p => ({ x: r1(p.x), y: r1(p.y), r: p.r, life: r2(p.life) })),
+      pickups: pickups.map(p => ({ x: r1(p.x), y: r1(p.y), r: p.r, life: r2(p.life), ability: p.ability })),
       boss: boss ? {
         x: r1(boss.x), y: r1(boss.y), r: boss.r,
         hp: r1(boss.hp), maxHp: r1(boss.maxHp),
@@ -3090,6 +3328,7 @@
         me.color = hostMe.color;
         me.speed = hostMe.speed;
         me.r = hostMe.r;
+        me.ability = hostMe.ability;
       }
     }
 
@@ -3356,6 +3595,33 @@
     }
   }
 
+  // Arco del escudo (habilidad dropeada): solo cubre de cara a hacia donde
+  // apunta el jugador (ver SHIELD_HALF_ANGLE), asi que se dibuja centrado en
+  // ese angulo para que se vea claramente por donde protege y por donde no.
+  function drawShieldFor(p, ang) {
+    if (!p || p.dead || p.ability !== 'shield') return;
+    const r = p.r + 22;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(ang);
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = ABILITY_META.shield.color;
+    ctx.lineWidth = 4;
+    ctx.shadowColor = ABILITY_META.shield.color;
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -SHIELD_HALF_ANGLE, SHIELD_HALF_ANGLE);
+    ctx.stroke();
+    ctx.globalAlpha = 0.14;
+    ctx.fillStyle = ABILITY_META.shield.color;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, r, -SHIELD_HALF_ANGLE, SHIELD_HALF_ANGLE);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawGrid();
@@ -3363,10 +3629,24 @@
     for (const pk of pickups) {
       ctx.save();
       ctx.globalAlpha = clamp(pk.life / 2, 0.3, 1);
-      ctx.fillStyle = '#3cff8f';
-      ctx.shadowColor = '#3cff8f';
-      ctx.shadowBlur = 12;
-      ctx.beginPath(); ctx.arc(pk.x, pk.y, pk.r, 0, Math.PI * 2); ctx.fill();
+      if (pk.ability) {
+        // Habilidad dropeada por el jefe: anillo pulsante del color de esa
+        // habilidad, bien distinto del orbe verde normal de curacion.
+        const meta = ABILITY_META[pk.ability] || ABILITY_META.laser;
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
+        ctx.strokeStyle = meta.color;
+        ctx.fillStyle = meta.color;
+        ctx.shadowColor = meta.color;
+        ctx.shadowBlur = 16 + pulse * 8;
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(pk.x, pk.y, pk.r + 4 + pulse * 3, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(pk.x, pk.y, pk.r * 0.55, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.fillStyle = '#3cff8f';
+        ctx.shadowColor = '#3cff8f';
+        ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.arc(pk.x, pk.y, pk.r, 0, Math.PI * 2); ctx.fill();
+      }
       ctx.restore();
     }
 
@@ -3424,11 +3704,12 @@
     drawBoss();
     drawBeams();
 
-    if (ally && !ally.dead) drawShip(ally, ally.aim);
-    if (ally2 && !ally2.dead) drawShip(ally2, ally2.aim);
+    if (ally && !ally.dead) { drawShip(ally, ally.aim); drawShieldFor(ally, ally.aim); }
+    if (ally2 && !ally2.dead) { drawShip(ally2, ally2.aim); drawShieldFor(ally2, ally2.aim); }
     if (me && !me.dead) {
       const myAim = (currentRole === 'client' || currentRole === 'client2') ? Math.atan2(mouse.y - me.y, mouse.x - me.x) : me.aim;
       drawShip(me, myAim);
+      drawShieldFor(me, myAim);
     }
 
     drawMinimap();
