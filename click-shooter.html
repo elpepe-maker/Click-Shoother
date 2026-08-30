@@ -1,0 +1,3978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Click Shooter</title>
+<!-- Esto convierte la pagina en instalable: el navegador ofrece "Instalar"
+     y a partir de ahi se abre en su propia ventana, sin barra de
+     direcciones, como una app de verdad. Solo funciona por https o en
+     localhost -- ver icon-192.png/icon-512.png/manifest.json/sw.js. -->
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#0b0d12">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #0b0d12;
+    overflow: hidden;
+    height: 100%;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    color: #e8ecf4;
+  }
+  #game-wrap {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0b0d12;
+  }
+  #stage {
+    position: relative;
+  }
+  canvas {
+    display: block;
+    background: #0b0d12;
+    cursor: crosshair;
+  }
+  #hud {
+    position: absolute;
+    inset: 0;
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    bottom: auto;
+    display: flex;
+    justify-content: space-between;
+    pointer-events: none;
+    font-size: 18px;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.6);
+    letter-spacing: 0.5px;
+  }
+  #hud .stat { margin-right: 24px; }
+  #bars { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  #healthbar-outer, #xpbar-outer, #ally-bar-outer {
+    width: 200px;
+    height: 16px;
+    border: 2px solid #4a5468;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #1a1f2b;
+  }
+  #xpbar-outer, #ally-bar-outer { height: 10px; }
+  #healthbar-inner {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #ff5a5a, #ff9a3c);
+    transition: width 0.15s ease-out;
+  }
+  #xpbar-inner {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #3d5afe, #9fdcff);
+    transition: width 0.15s ease-out;
+  }
+  #ally-bar-inner {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #ffb238, #ffd23c);
+    transition: width 0.15s ease-out;
+  }
+  #leave-btn {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    pointer-events: auto;
+    background: rgba(30,34,46,0.7);
+    color: #aab3c5;
+    border: 1px solid #4a5468;
+    border-radius: 6px;
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  #leave-btn:hover { color: #e8ecf4; border-color: #7a8bb5; }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(8, 9, 14, 0.9);
+    text-align: center;
+    padding: 20px;
+    box-sizing: border-box;
+    overflow-y: auto;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h1 {
+    font-size: 42px;
+    margin: 0 0 8px 0;
+    color: #ff5a5a;
+    text-shadow: 0 0 20px rgba(255,90,90,0.5);
+  }
+  #overlay h2 {
+    font-size: 20px;
+    margin: 0 0 20px 0;
+    color: #9fb3ff;
+    font-weight: normal;
+  }
+  #overlay p {
+    max-width: 480px;
+    line-height: 1.5;
+    color: #aab3c5;
+    font-size: 14px;
+  }
+  .hidden { display: none !important; }
+  button {
+    padding: 12px 28px;
+    font-size: 16px;
+    background: #3d5afe;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(61,90,254,0.4);
+  }
+  button:hover { background: #5170ff; }
+  button.secondary {
+    background: #232838;
+    box-shadow: none;
+    border: 1px solid #4a5468;
+  }
+  button.secondary:hover { background: #2d3448; }
+  #identity-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 6px 0 20px 0; }
+  #name-input {
+    font-size: 15px;
+    padding: 9px 14px;
+    border-radius: 8px;
+    border: 2px solid #4a5468;
+    background: #161a24;
+    color: #e8ecf4;
+    width: 200px;
+    text-align: center;
+  }
+  .picker-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .picker-label { font-size: 12px; color: #9fb3ff; min-width: 62px; text-align: right; }
+  .swatch-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 420px; }
+  .swatch {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: #161a24;
+    border: 2px solid #3d4560;
+    color: #aab3c5;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .swatch:hover { border-color: #5170ff; }
+  .swatch .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .swatch.selected { border-color: #3d5afe; color: #e8ecf4; background: #1d2436; }
+  #mode-buttons { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; justify-content: center; }
+  .mp-sub {
+    margin-top: 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  #room-code {
+    font-size: 40px;
+    font-weight: bold;
+    letter-spacing: 8px;
+    color: #3cff8f;
+    background: #161a24;
+    border: 2px solid #3d4560;
+    border-radius: 10px;
+    padding: 10px 24px;
+  }
+  #join-form { display: flex; gap: 10px; }
+  #join-input {
+    font-size: 22px;
+    letter-spacing: 6px;
+    text-align: center;
+    text-transform: uppercase;
+    width: 180px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 2px solid #4a5468;
+    background: #161a24;
+    color: #e8ecf4;
+  }
+  #host-status, #join-status { font-size: 13px; color: #9fb3ff; min-height: 16px; }
+  /* El aviso de versiones distintas tiene que cantar, no pasar desapercibido. */
+  #host-status.warn, #join-status.warn { color: #ffd23c; max-width: 420px; line-height: 1.45; }
+  .player-list { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; min-width: 220px; }
+  .player-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #161a24;
+    border: 1px solid #3d4560;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 14px;
+  }
+  .player-row .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  #levelup-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(8, 9, 14, 0.92);
+    text-align: center;
+  }
+  #levelup-overlay.hidden { display: none; }
+  #levelup-overlay h1 {
+    font-size: 34px;
+    margin: 0 0 4px 0;
+    color: #3cff8f;
+    text-shadow: 0 0 20px rgba(60,255,143,0.5);
+  }
+  #levelup-overlay h2 {
+    font-size: 17px;
+    margin: 0 0 20px 0;
+    color: #9fb3ff;
+    font-weight: normal;
+  }
+  #levelup-status {
+    font-size: 13px;
+    color: #ffd23c;
+    min-height: 18px;
+    margin-top: 16px;
+  }
+  #levelup-choices {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 900px;
+  }
+  .upgrade-card {
+    width: 190px;
+    padding: 18px 16px;
+    background: #161a24;
+    border: 2px solid #3d4560;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: transform 0.12s ease, border-color 0.12s ease, opacity 0.12s ease, box-shadow 0.12s ease;
+  }
+  .upgrade-card:hover {
+    transform: translateY(-4px);
+  }
+  .upgrade-card h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    color: #e8ecf4;
+  }
+  .upgrade-card p {
+    margin: 0;
+    font-size: 13px;
+    color: #aab3c5;
+    line-height: 1.4;
+  }
+  .rarity-tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    color: var(--rarity-color, #9aa3b5);
+  }
+  /* Comun/raro/epico/legendario: un color liso que marca borde, titulo y
+     etiqueta. Cuanto mas rara, mas brillo alrededor de la carta. */
+  .upgrade-card.rarity-common { --rarity-color: #9aa3b5; border-color: #4a5468; }
+  .upgrade-card.rarity-rare { --rarity-color: #4d94ff; border-color: #3d6fcc; box-shadow: 0 0 10px -4px #4d94ff; }
+  .upgrade-card.rarity-epic { --rarity-color: #b44dff; border-color: #9339d6; box-shadow: 0 0 14px -3px #b44dff; }
+  .upgrade-card.rarity-legendary { --rarity-color: #ffd23c; border-color: #d6a91a; box-shadow: 0 0 18px -2px #ffd23c; }
+  .upgrade-card.rarity-common:hover { border-color: #6b7690; }
+  .upgrade-card.rarity-rare:hover { border-color: #4d94ff; box-shadow: 0 0 16px -2px #4d94ff; }
+  .upgrade-card.rarity-epic:hover { border-color: #b44dff; box-shadow: 0 0 20px -1px #b44dff; }
+  .upgrade-card.rarity-legendary:hover { border-color: #ffd23c; box-shadow: 0 0 24px 0 #ffd23c; }
+  .upgrade-card.rarity-legendary h3 { color: #ffe066; }
+  /* Exotico: el unico sin un solo color, es un degradado que se desliza. */
+  .upgrade-card.rarity-exotic {
+    --rarity-color: #ff6ad5;
+    border: 2px solid transparent;
+    background:
+      linear-gradient(#161a24, #161a24) padding-box,
+      linear-gradient(120deg, #ff5a5a, #ffd23c, #7cfc9a, #4de1ff, #b44dff, #ff5a5a) border-box;
+    background-size: 100% 100%, 300% 100%;
+    box-shadow: 0 0 22px -2px #b44dff;
+    animation: exotic-shimmer 5s linear infinite;
+  }
+  .upgrade-card.rarity-exotic h3 {
+    background: linear-gradient(120deg, #ff5a5a, #ffd23c, #7cfc9a, #4de1ff, #b44dff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  @keyframes exotic-shimmer {
+    to { background-position: 0 0, 300% 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .upgrade-card.rarity-exotic { animation: none; }
+  }
+  kbd {
+    background: #232838;
+    border: 1px solid #4a5468;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 13px;
+  }
+
+  #mute-indicator {
+    position: absolute;
+    bottom: -640px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px;
+    color: #9fb3ff;
+    background: rgba(10, 12, 18, 0.75);
+    border: 1px solid #3d4560;
+    border-radius: 6px;
+    padding: 4px 12px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+
+  /* ---------- barra de vida del jefe ---------- */
+  #boss-bar {
+    position: absolute;
+    top: 52px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 62%;
+    pointer-events: none;
+    text-align: center;
+    z-index: 5;
+  }
+  #boss-bar.hidden { display: none; }
+  #boss-name {
+    font-size: 20px;
+    font-weight: bold;
+    letter-spacing: 3px;
+    color: #ffe0e0;
+    text-shadow: 0 0 12px rgba(255, 60, 60, 0.9), 0 2px 4px #000;
+    margin-bottom: 6px;
+  }
+  #boss-bar-outer {
+    position: relative;
+    height: 26px;
+    background: #16090c;
+    border: 2px solid #ff5a5a;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 0 22px rgba(255, 60, 60, 0.45);
+  }
+  #boss-bar-inner {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #7a0d1a, #ff3b3b 45%, #ff8a3c);
+    transition: width 0.12s linear;
+  }
+  /* marcas que dividen la barra para que se lea mejor cuanto queda */
+  #boss-bar-marks {
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      to right,
+      rgba(0, 0, 0, 0.55) 0 2px,
+      transparent 2px 10%
+    );
+  }
+  #boss-phase {
+    margin-top: 5px;
+    font-size: 13px;
+    letter-spacing: 1px;
+    color: #ffb0b0;
+    text-shadow: 0 2px 4px #000;
+    min-height: 16px;
+  }
+
+  /* ---------- espectador: aviso, chat y panel ---------- */
+  /* Quien entra a mirar no lo hace a escondidas: este aviso se ve en la
+     pantalla de los que juegan cuando alguien se une o se va. */
+  #spec-banner {
+    position: absolute;
+    top: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 14px;
+    color: #ffd166;
+    background: rgba(10, 12, 18, 0.85);
+    border: 1px solid #6b4f1a;
+    border-radius: 8px;
+    padding: 8px 18px;
+    z-index: 6;
+    opacity: 0;
+    transition: opacity 0.4s;
+    pointer-events: none;
+  }
+  #spec-banner.show { opacity: 1; }
+  /* El mensaje del espectador, bien visible en medio de la pantalla de los
+     jugadores, con su nombre encima para que se sepa quien lo manda. */
+  #spec-chat-toast {
+    position: absolute;
+    top: 44%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 70%;
+    text-align: center;
+    color: #e8ecf4;
+    background: rgba(10, 12, 18, 0.88);
+    border: 2px solid #5170ff;
+    border-radius: 12px;
+    padding: 16px 26px;
+    z-index: 7;
+    opacity: 0;
+    transition: opacity 0.35s;
+    pointer-events: none;
+  }
+  #spec-chat-toast.show { opacity: 1; }
+  #spec-chat-toast .spec-chat-name {
+    display: block;
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #9fb3ff;
+    margin-bottom: 6px;
+  }
+  #spec-chat-toast .spec-chat-text { font-size: 19px; }
+  /* Panel del propio espectador: no aparece para quien juega, solo para
+     quien esta mirando. */
+  #spectator-panel {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    background: rgba(10, 12, 18, 0.82);
+    border: 1px solid #3d4560;
+    border-radius: 10px;
+    padding: 10px 16px;
+    z-index: 6;
+  }
+  #spec-chat-row { display: flex; gap: 8px; }
+  #spec-chat-input {
+    width: 260px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid #4a5468;
+    background: #161a24;
+    color: #e8ecf4;
+    font-size: 13px;
+  }
+  #spec-spawn-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 420px; }
+  .spec-spawn-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+    background: #232838;
+    border: 1px solid #4a5468;
+    box-shadow: none;
+  }
+  .spec-spawn-btn:hover { background: #2d3448; }
+</style>
+</head>
+<body>
+<div id="game-wrap">
+  <div id="stage">
+    <canvas id="canvas"></canvas>
+    <div id="hud">
+      <div>
+        <span class="stat">Puntos: <b id="score">0</b></span>
+        <span class="stat">Galaxia: <b id="galaxy">1</b></span>
+        <span class="stat">Salas: <b id="rooms">0</b></span>
+        <span class="stat">Mejoras: <b id="level">0</b></span>
+      </div>
+      <div id="bars">
+        <div id="healthbar-outer"><div id="healthbar-inner"></div></div>
+        <div id="xpbar-outer"><div id="xpbar-inner"></div></div>
+        <div id="ally-bar-outer" style="display:none;"><div id="ally-bar-inner"></div></div>
+      </div>
+      <button id="leave-btn">Leave</button>
+      <div id="mute-indicator">🔊 Sonido (M)</div>
+    </div>
+
+    <div id="boss-bar" class="hidden">
+      <div id="boss-name">JEFE</div>
+      <div id="boss-bar-outer">
+        <div id="boss-bar-inner"></div>
+        <div id="boss-bar-marks"></div>
+      </div>
+      <div id="boss-phase"></div>
+    </div>
+
+    <div id="spec-banner" class="hidden"></div>
+    <div id="spec-chat-toast" class="hidden"></div>
+
+    <!-- Solo visible para quien entra como espectador: no controla ninguna
+         nave, pero puede charlar con los jugadores e invocar enemigos. -->
+    <div id="spectator-panel" class="hidden">
+      <div id="spec-chat-row">
+        <input id="spec-chat-input" maxlength="140" placeholder="Escribe algo…" autocomplete="off" />
+        <button id="spec-chat-send">Enviar</button>
+      </div>
+      <div id="spec-spawn-row">
+        <span class="picker-label">Invocar</span>
+        <button type="button" class="spec-spawn-btn" data-type="grunt">Grunt</button>
+        <button type="button" class="spec-spawn-btn" data-type="fast">Fast</button>
+        <button type="button" class="spec-spawn-btn" data-type="shooter">Shooter</button>
+        <button type="button" class="spec-spawn-btn" data-type="tank">Tank</button>
+        <button type="button" class="spec-spawn-btn" data-type="bomber">Bomber</button>
+        <button type="button" class="spec-spawn-btn" data-type="sniper">Sniper</button>
+      </div>
+    </div>
+
+    <div id="overlay">
+      <div id="menu-panel">
+        <h1>CLICK SHOOTER</h1>
+        <h2>Cruza las salas hasta el jefe — solo o en co-op</h2>
+        <p>
+          Muevete con <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>, apunta con el raton y haz clic o manten pulsado para disparar.
+          Cada galaxia es un mapa de salas: limpia una, elige una mejora y cruza un portal hacia la siguiente. Llega a la sala del jefe, al otro lado del mapa, para abrir el portal a la galaxia siguiente. Las salas amarillas quedan fuera del camino y dan mejoras extra.
+          El co-op usa una conexion directa entre los dos, gratis: no hace falta estar en la misma red, solo que cada uno tenga internet.
+        </p>
+
+        <div id="identity-panel">
+          <input id="name-input" maxlength="14" placeholder="Tu nombre" autocomplete="off" />
+          <div class="picker-row">
+            <span class="picker-label">Skin</span>
+            <div id="skin-picker" class="swatch-row"></div>
+          </div>
+          <div class="picker-row">
+            <span class="picker-label">Proyectil</span>
+            <div id="projectile-picker" class="swatch-row"></div>
+          </div>
+        </div>
+
+        <div id="mode-buttons">
+          <button id="solo-btn">Play Solo</button>
+          <button id="host-btn" class="secondary">Host Co-op</button>
+          <button id="join-btn" class="secondary">Join Co-op</button>
+          <button id="spectate-btn" class="secondary hidden">Ver partida</button>
+        </div>
+        <div id="host-panel" class="mp-sub hidden">
+          <p style="margin:0;">Comparte este código con tu compañero:</p>
+          <div id="room-code">----</div>
+          <div id="host-player-list" class="player-list"></div>
+          <p id="host-status">Generando código…</p>
+          <div style="display:flex; gap:10px;">
+            <button id="start-hosted-btn" class="hidden">Iniciar partida</button>
+            <button id="cancel-host-btn" class="secondary">Cancelar</button>
+          </div>
+        </div>
+        <div id="join-panel" class="mp-sub hidden">
+          <div id="join-form">
+            <input id="join-input" maxlength="6" placeholder="CÓDIGO" autocomplete="off" />
+            <button id="connect-btn">Conectar</button>
+          </div>
+          <p id="join-status"></p>
+          <div id="join-player-list" class="player-list hidden"></div>
+          <p id="join-wait-text" class="hidden">Esperando a que el host inicie la partida…</p>
+          <button id="cancel-join-btn" class="secondary">Cancelar</button>
+        </div>
+        <div id="spectate-panel" class="mp-sub hidden">
+          <p style="margin:0;">Código de la partida que quieres ver:</p>
+          <div id="spectate-form">
+            <input id="spectate-input" maxlength="6" placeholder="CÓDIGO" autocomplete="off" />
+            <button id="spectate-connect-btn">Conectar</button>
+          </div>
+          <p id="spectate-status"></p>
+          <button id="cancel-spectate-btn" class="secondary">Cancelar</button>
+        </div>
+      </div>
+      <div id="gameover-panel" class="hidden">
+        <h1>GAME OVER</h1>
+        <h2 id="gameover-sub"></h2>
+        <button id="playagain-btn">Play Again</button>
+      </div>
+    </div>
+
+    <div id="levelup-overlay" class="hidden">
+      <h1>LEVEL UP!</h1>
+      <h2>Choose an upgrade</h2>
+      <div id="levelup-choices"></div>
+      <p id="levelup-status"></p>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+(() => {
+  const LOGICAL_W = 1280, LOGICAL_H = 720;
+
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const stage = document.getElementById('stage');
+  const overlay = document.getElementById('overlay');
+  const menuPanel = document.getElementById('menu-panel');
+  const gameoverPanel = document.getElementById('gameover-panel');
+  const gameoverSub = document.getElementById('gameover-sub');
+  const identityPanel = document.getElementById('identity-panel');
+  const modeButtons = document.getElementById('mode-buttons');
+  const hostPanel = document.getElementById('host-panel');
+  const joinPanel = document.getElementById('join-panel');
+  const hostStatus = document.getElementById('host-status');
+  const joinStatus = document.getElementById('join-status');
+  const roomCodeEl = document.getElementById('room-code');
+  const joinInput = document.getElementById('join-input');
+  const joinForm = document.getElementById('join-form');
+  const nameInput = document.getElementById('name-input');
+  const skinPicker = document.getElementById('skin-picker');
+  const projectilePicker = document.getElementById('projectile-picker');
+  const hostPlayerList = document.getElementById('host-player-list');
+  const joinPlayerList = document.getElementById('join-player-list');
+  const joinWaitText = document.getElementById('join-wait-text');
+  const startHostedBtn = document.getElementById('start-hosted-btn');
+  const spectatePanel = document.getElementById('spectate-panel');
+  const spectateInput = document.getElementById('spectate-input');
+  const spectateStatus = document.getElementById('spectate-status');
+
+  const scoreEl = document.getElementById('score');
+  const galaxyEl = document.getElementById('galaxy');
+  const roomsEl = document.getElementById('rooms');
+  const levelEl = document.getElementById('level');
+  const healthInner = document.getElementById('healthbar-inner');
+  const xpInner = document.getElementById('xpbar-inner');
+  const allyBarOuter = document.getElementById('ally-bar-outer');
+  const allyBarInner = document.getElementById('ally-bar-inner');
+  const levelupOverlay = document.getElementById('levelup-overlay');
+  const levelupChoices = document.getElementById('levelup-choices');
+  const levelupStatus = document.getElementById('levelup-status');
+  const leaveBtn = document.getElementById('leave-btn');
+  const muteIndicator = document.getElementById('mute-indicator');
+  const bossBar = document.getElementById('boss-bar');
+  const bossNameEl = document.getElementById('boss-name');
+  const bossBarInner = document.getElementById('boss-bar-inner');
+  const bossPhaseEl = document.getElementById('boss-phase');
+  const specBanner = document.getElementById('spec-banner');
+  const specChatToast = document.getElementById('spec-chat-toast');
+  const spectatorPanel = document.getElementById('spectator-panel');
+  const specChatInput = document.getElementById('spec-chat-input');
+  const specChatSendBtn = document.getElementById('spec-chat-send');
+
+  // ---------- jefes ----------
+  // Cada jefe tiene su propio reparto de habilidades (no comparten cajon):
+  // asi cada uno se juega distinto en vez de ser el mismo jefe con otro color.
+  const BOSS_TYPES = [
+    // Solo proyectiles en muchas direcciones: sin embestida, sin meteoritos, sin misiles.
+    { name: 'EL DEVORADOR', color: '#ff4d4d', accent: '#ffb347', abilities: ['slam', 'nova', 'spiral'] },
+    // Solo ataques desde el aire: meteoritos y el orbe que se parte en tres.
+    { name: 'NUCLEO PRISMA', color: '#b44dff', accent: '#66e0ff', abilities: ['meteor', 'megaOrb'] },
+    // La embestida aqui rebota una vez en la pared antes de frenar.
+    { name: 'OJO CARMESI', color: '#ff2d78', accent: '#ffd166', abilities: ['charge', 'laser', 'summon', 'homing', 'crossbeam'] },
+    { name: 'COLOSO DE HIERRO', color: '#ff8c1a', accent: '#ffe066', abilities: ['slam', 'laser', 'summon', 'spiral', 'charge', 'nova', 'homing', 'meteor', 'crossbeam'] },
+  ];
+
+  const ABILITY_LABEL = {
+    slam: 'PISOTON',
+    laser: 'CARGANDO LASER',
+    summon: 'INVOCANDO',
+    spiral: 'ESPIRAL',
+    charge: 'EMBESTIDA',
+    nova: 'NOVA',
+    homing: 'MISILES',
+    meteor: 'LLUVIA DE METEOROS',
+    crossbeam: 'RAYOS GIRATORIOS',
+    megaOrb: 'ORBE DE ENERGIA',
+  };
+
+  // ---------- mejoras y rarezas ----------
+  // Cinco calidades, de mas comun a mas rara. "exotic" no tiene un solo color:
+  // se pinta con un degradado (ver .rarity-exotic en el CSS).
+  const RARITY_META = {
+    common:    { label: 'Común',      color: '#9aa3b5' },
+    rare:      { label: 'Raro',       color: '#4d94ff' },
+    epic:      { label: 'Épico',      color: '#b44dff' },
+    legendary: { label: 'Legendario', color: '#ffd23c' },
+    exotic:    { label: 'Exótico',    color: '#ff6ad5' },
+  };
+
+  // Probabilidad de cada calidad segun el tipo de sala. La sala normal da
+  // sobre todo mejoras flojas: casi siempre comun, lo bueno de verdad se
+  // busca en las salas extra (bonus y miniboss), que a cambio son mas
+  // dificiles, solo se llega a ellas desde una sala normal (nunca de una
+  // extra a otra) y dan solo una mejora en vez de tres a elegir de golpe.
+  const RARITY_WEIGHTS_NORMAL = [['common', 80], ['rare', 14], ['epic', 4.5], ['legendary', 1.2], ['exotic', 0.3]];
+  const RARITY_WEIGHTS_EXTRA = [['common', 20], ['rare', 40], ['epic', 25], ['legendary', 10], ['exotic', 5]];
+
+  function rollRarity(weights) {
+    const total = weights.reduce((sum, [, w]) => sum + w, 0);
+    let roll = Math.random() * total;
+    for (const [key, w] of weights) {
+      if (roll < w) return key;
+      roll -= w;
+    }
+    return weights[weights.length - 1][0];
+  }
+
+  // Techo de cada estadistica: sin esto, encadenar la misma mejora muchas
+  // veces en una partida larga la deja creciendo sin fin. fireRate es el
+  // tiempo ENTRE disparos, asi que su "techo" es un minimo (mas bajo = mas
+  // rapido); todo lo demas es un maximo normal.
+  const STAT_CAPS = {
+    fireRateMin: 0.05,
+    dmg: 60,
+    speed: 480,
+    maxHp: 260,
+    shotCount: 6,
+    pierce: 5,
+    bulletSpeed: 1300,
+    bulletLife: 2.4,
+  };
+
+  const mulFireRate = f => p => { p.fireRate = Math.max(STAT_CAPS.fireRateMin, p.fireRate * f); };
+  const addDmg = n => p => { p.dmg = Math.min(STAT_CAPS.dmg, p.dmg + n); };
+  const mulSpeed = f => p => { p.speed = Math.min(STAT_CAPS.speed, p.speed * f); };
+  const addMaxHp = n => p => { p.maxHp = Math.min(STAT_CAPS.maxHp, p.maxHp + n); p.hp = p.maxHp; };
+  const mulBulletSpeed = f => p => { p.bulletSpeed = Math.min(STAT_CAPS.bulletSpeed, p.bulletSpeed * f); };
+  const mulBulletLife = f => p => { p.bulletLife = Math.min(STAT_CAPS.bulletLife, p.bulletLife * f); };
+  const addShotCount = n => p => { p.shotCount = Math.min(STAT_CAPS.shotCount, p.shotCount + n); };
+  const addPierce = n => p => { p.pierce = Math.min(STAT_CAPS.pierce, p.pierce + n); };
+
+  // Cada mejora toca UNA sola estadistica (nada de combos "+X y +Y" en la
+  // misma carta) y tiene un techo (arriba). La calidad epica es el estandar:
+  // lo que antes se sentia como una buena mejora corriente vive ahora ahi.
+  // Comun es claramente floja (un empujoncito, no una mejora de verdad);
+  // legendaria y exotica son las que de verdad cambian la partida.
+  const UPGRADE_POOL = [
+    // ---- comun (gris): un empujoncito, no cambia la partida ----
+    { name: 'Quick Trigger', rarity: 'common', desc: '+6% fire rate', apply: mulFireRate(0.94) },
+    { name: 'Sharpened Rounds', rarity: 'common', desc: '+2 damage per shot', apply: addDmg(2) },
+    { name: 'Light Boots', rarity: 'common', desc: '+4% move speed', apply: mulSpeed(1.04) },
+    { name: 'Bandage', rarity: 'common', desc: '+8 max HP, full heal', apply: addMaxHp(8) },
+    { name: 'Field Medkit', rarity: 'common', desc: 'Instantly heal 30 HP', apply: p => { p.hp = clamp(p.hp + 30, 0, p.maxHp); } },
+    // ---- raro (azul): ya se nota, pero no define la partida ----
+    { name: 'Rapid Fire', rarity: 'rare', desc: '+12% fire rate', apply: mulFireRate(0.88) },
+    { name: 'Heavy Rounds', rarity: 'rare', desc: '+5 damage per shot', apply: addDmg(5) },
+    { name: 'Swift Legs', rarity: 'rare', desc: '+9% move speed', apply: mulSpeed(1.09) },
+    { name: 'Vitality', rarity: 'rare', desc: '+18 max HP, full heal', apply: addMaxHp(18) },
+    { name: 'Light Powder', rarity: 'rare', desc: '+14% bullet speed', apply: mulBulletSpeed(1.14) },
+    { name: 'Extended Clip', rarity: 'rare', desc: '+14% bullet range', apply: mulBulletLife(1.14) },
+    // ---- epico (morado): el estandar, lo que se espera de una buena mejora ----
+    { name: 'Twin Fire', rarity: 'epic', desc: '+20% fire rate', apply: mulFireRate(0.8) },
+    { name: 'Overcharged Rounds', rarity: 'epic', desc: '+10 damage per shot', apply: addDmg(10) },
+    { name: "Sprinter's Boots", rarity: 'epic', desc: '+16% move speed', apply: mulSpeed(1.16) },
+    { name: 'Field Rations', rarity: 'epic', desc: '+30 max HP, full heal', apply: addMaxHp(30) },
+    { name: 'Accelerator Core', rarity: 'epic', desc: '+24% bullet speed', apply: mulBulletSpeed(1.24) },
+    { name: 'Long Barrel', rarity: 'epic', desc: '+24% bullet range', apply: mulBulletLife(1.24) },
+    { name: 'Multishot', rarity: 'epic', desc: '+1 projectile per shot', apply: addShotCount(1) },
+    { name: 'Armor Piercing', rarity: 'epic', desc: 'Bullets pierce 1 more enemy', apply: addPierce(1) },
+    // ---- legendario (amarillo): cambia como juegas ----
+    { name: 'Adrenal Trigger', rarity: 'legendary', desc: '+30% fire rate', apply: mulFireRate(0.7) },
+    { name: 'Devastator Rounds', rarity: 'legendary', desc: '+18 damage per shot', apply: addDmg(18) },
+    { name: 'Adrenal Sprint', rarity: 'legendary', desc: '+24% move speed', apply: mulSpeed(1.24) },
+    { name: 'Iron Constitution', rarity: 'legendary', desc: '+45 max HP, full heal', apply: addMaxHp(45) },
+    { name: 'Hypervelocity Core', rarity: 'legendary', desc: '+34% bullet speed', apply: mulBulletSpeed(1.34) },
+    { name: 'Sniper Barrel', rarity: 'legendary', desc: '+34% bullet range', apply: mulBulletLife(1.34) },
+    { name: 'Twin Cannon', rarity: 'legendary', desc: '+2 projectiles per shot', apply: addShotCount(2) },
+    { name: 'Depleted Rounds', rarity: 'legendary', desc: 'Bullets pierce 2 more enemies', apply: addPierce(2) },
+    // ---- exotico (arcoiris): lo mas fuerte que existe, y sigue siendo UNA cosa ----
+    { name: 'Hyperfire Core', rarity: 'exotic', desc: '+42% fire rate', apply: mulFireRate(0.58) },
+    { name: 'Annihilator Rounds', rarity: 'exotic', desc: '+28 damage per shot', apply: addDmg(28) },
+    { name: 'Phase Runners', rarity: 'exotic', desc: '+34% move speed', apply: mulSpeed(1.34) },
+    { name: "Titan's Blood", rarity: 'exotic', desc: '+65 max HP, full heal', apply: addMaxHp(65) },
+    { name: 'Relativistic Core', rarity: 'exotic', desc: '+48% bullet speed', apply: mulBulletSpeed(1.48) },
+    { name: 'Railgun Barrel', rarity: 'exotic', desc: '+48% bullet range', apply: mulBulletLife(1.48) },
+    { name: 'Triple Cannon', rarity: 'exotic', desc: '+3 projectiles per shot', apply: addShotCount(3) },
+    { name: 'Tungsten Core', rarity: 'exotic', desc: 'Bullets pierce 3 more enemies', apply: addPierce(3) },
+  ];
+
+  // Reparte 3 (o 1, en sala extra) mejoras: la calidad de CADA una se tira
+  // por separado con la tabla de probabilidades, y luego se elige al azar
+  // dentro de esa calidad. Evita repetir el mismo nombre en la misma oferta.
+  function pickUpgradeChoices(weights, count) {
+    const chosen = [];
+    const used = new Set();
+    let guard = 0;
+    while (chosen.length < count && guard < 300) {
+      guard++;
+      const rarity = rollRarity(weights);
+      const options = UPGRADE_POOL.filter(u => u.rarity === rarity && !used.has(u.name));
+      if (!options.length) continue; // esa calidad ya se agoto en esta oferta, se reintenta
+      const pick = options[Math.floor(Math.random() * options.length)];
+      used.add(pick.name);
+      chosen.push(pick);
+    }
+    return chosen;
+  }
+
+  const SKINS = [
+    { id: 'blue', name: 'Azul', color: '#3d5afe' },
+    { id: 'cyan', name: 'Cian', color: '#22d3ee' },
+    { id: 'pink', name: 'Rosa', color: '#ff4fd8' },
+    { id: 'lime', name: 'Lima', color: '#a3ff12' },
+    { id: 'orange', name: 'Naranja', color: '#ff9d3d' },
+    { id: 'purple', name: 'Morado', color: '#9b5cff' },
+    { id: 'white', name: 'Blanco', color: '#f5f5f5' },
+    { id: 'amber', name: 'Ámbar', color: '#ffb238' },
+  ];
+  const PROJECTILES = [
+    { id: 'bolt', name: 'Rayo', color: '#9fdcff', shape: 'circle', r: 4 },
+    { id: 'laser', name: 'Láser', color: '#ff5ad1', shape: 'line', length: 22, width: 3, r: 4 },
+    { id: 'orb', name: 'Orbe', color: '#7cfc9a', shape: 'circle', r: 7 },
+    { id: 'star', name: 'Estrella', color: '#ffe066', shape: 'star', r: 6 },
+    { id: 'baguette', name: 'Baguette', color: '#e0a458', accent: '#7a4a1f', shape: 'baguette', length: 26, width: 9, r: 6 },
+  ];
+  const SKIN_MAP = Object.fromEntries(SKINS.map(s => [s.id, s]));
+  const PROJECTILE_MAP = Object.fromEntries(PROJECTILES.map(p => [p.id, p]));
+
+  // Paleta compartida para la red: en vez de mandar "#ff5a5a" (9 bytes) por
+  // cada enemigo, se manda su indice (1 byte).
+  const NET_COLORS = [
+    '#ff5a5a', '#ffd23c', '#c15aff', '#8b2f2f', '#ff7b1a', '#4de1ff',
+    '#ffb347', '#66e0ff', '#ffd166', '#ffe066', '#e0952a',
+  ];
+  const NET_COLOR_INDEX = Object.fromEntries(NET_COLORS.map((c, i) => [c, i]));
+  const PROJECTILE_IDS = PROJECTILES.map(p => p.id);
+
+  // ---------- identity (name / skin / projectile) ----------
+  let myName = localStorage.getItem('cs_name') || 'Jugador';
+  let mySkin = localStorage.getItem('cs_skin') || 'blue';
+  let myProjectile = localStorage.getItem('cs_proj') || 'bolt';
+  if (!SKIN_MAP[mySkin]) mySkin = 'blue';
+  if (!PROJECTILE_MAP[myProjectile]) myProjectile = 'bolt';
+
+  function saveIdentity() {
+    localStorage.setItem('cs_name', myName);
+    localStorage.setItem('cs_skin', mySkin);
+    localStorage.setItem('cs_proj', myProjectile);
+  }
+  function effectiveName() {
+    const v = (myName || '').trim();
+    return v ? v.slice(0, 14) : 'Jugador';
+  }
+
+  nameInput.value = myName;
+  nameInput.addEventListener('input', () => { myName = nameInput.value.slice(0, 14); saveIdentity(); });
+
+  function renderSwatches(container, items, selectedId, onPick) {
+    container.innerHTML = '';
+    items.forEach(item => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'swatch' + (item.id === selectedId ? ' selected' : '');
+      btn.innerHTML = `<span class="dot" style="background:${item.color}"></span>${item.name}`;
+      btn.addEventListener('click', () => onPick(item.id));
+      container.appendChild(btn);
+    });
+  }
+  function refreshPickers() {
+    renderSwatches(skinPicker, SKINS, mySkin, id => { mySkin = id; saveIdentity(); refreshPickers(); });
+    renderSwatches(projectilePicker, PROJECTILES, myProjectile, id => { myProjectile = id; saveIdentity(); refreshPickers(); });
+  }
+  refreshPickers();
+
+  function renderPlayerList(container, players) {
+    container.innerHTML = '';
+    players.forEach(pl => {
+      const row = document.createElement('div');
+      row.className = 'player-row';
+      row.innerHTML = `<span class="dot" style="background:${pl.color}"></span><span>${pl.name}</span>`;
+      container.appendChild(row);
+    });
+  }
+
+  // ---------- fixed logical resolution, scaled to fit the window ----------
+  canvas.width = LOGICAL_W;
+  canvas.height = LOGICAL_H;
+
+  function resize() {
+    const scale = Math.min(window.innerWidth / LOGICAL_W, window.innerHeight / LOGICAL_H);
+    const w = LOGICAL_W * scale, h = LOGICAL_H * scale;
+    stage.style.width = w + 'px';
+    stage.style.height = h + 'px';
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- input ----------
+  // Los atajos escuchan en toda la ventana, asi que se disparaban tambien
+  // mientras se escribia el nombre o el codigo de sala: una "m" en el nombre
+  // silenciaba el juego para siempre (queda guardado en el navegador).
+  const escribiendo = e => {
+    const t = e.target;
+    return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+  };
+
+  const keys = {};
+  window.addEventListener('keydown', e => { if (!escribiendo(e)) keys[e.key.toLowerCase()] = true; });
+  window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+  const mouse = { x: 0, y: 0, down: false };
+  canvas.addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - r.left) * (LOGICAL_W / r.width);
+    mouse.y = (e.clientY - r.top) * (LOGICAL_H / r.height);
+  });
+  canvas.addEventListener('mousedown', () => mouse.down = true);
+  window.addEventListener('mouseup', () => mouse.down = false);
+
+  // ---------- utility ----------
+  function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function rand(min, max) { return Math.random() * (max - min) + min; }
+  function randomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let s = '';
+    for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  }
+
+  // ---------- audio ----------
+  // Todo el sonido esta sintetizado con Web Audio: ni un solo archivo externo,
+  // asi el juego sigue siendo un unico .html que funciona sin conexion.
+  const Sound = (() => {
+    let ctx = null, master = null, noiseBuffer = null;
+    let muted = localStorage.getItem('cs_muted') === '1';
+    const lastPlayed = {};
+
+    function init() {
+      if (ctx) return;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      ctx = new AC();
+      master = ctx.createGain();
+      master.gain.value = 0.32;
+      master.connect(ctx.destination);
+
+      // Ruido blanco reutilizable para explosiones e impactos.
+      const len = ctx.sampleRate * 2;
+      noiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    }
+
+    function ready() {
+      if (!ctx || muted) return false;
+      if (ctx.state === 'suspended') ctx.resume();
+      return true;
+    }
+
+    // Evita que un mismo sonido se dispare 50 veces por segundo.
+    function throttled(key, minGap) {
+      const t = performance.now();
+      if (lastPlayed[key] && t - lastPlayed[key] < minGap) return true;
+      lastPlayed[key] = t;
+      return false;
+    }
+
+    function tone(opts) {
+      if (!ready()) return;
+      const {
+        type = 'sine', f0, f1 = null, dur = 0.15,
+        peak = 0.3, delay = 0, attack = 0.005,
+      } = opts;
+      const t0 = ctx.currentTime + delay;
+
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.setValueAtTime(Math.max(1, f0), t0);
+      if (f1 !== null) osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(peak, t0 + attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+      osc.connect(gain); gain.connect(master);
+      osc.start(t0); osc.stop(t0 + dur + 0.05);
+    }
+
+    function noise(opts) {
+      if (!ready()) return;
+      const {
+        dur = 0.2, peak = 0.3, delay = 0,
+        freq = 1400, freqTo = null, q = 1, filter = 'lowpass',
+      } = opts;
+      const t0 = ctx.currentTime + delay;
+
+      const src = ctx.createBufferSource();
+      src.buffer = noiseBuffer;
+      src.loop = true;
+
+      const biquad = ctx.createBiquadFilter();
+      biquad.type = filter;
+      biquad.frequency.setValueAtTime(freq, t0);
+      if (freqTo !== null) biquad.frequency.exponentialRampToValueAtTime(Math.max(20, freqTo), t0 + dur);
+      biquad.Q.value = q;
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(peak, t0 + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+      src.connect(biquad); biquad.connect(gain); gain.connect(master);
+      src.start(t0); src.stop(t0 + dur + 0.05);
+    }
+
+    // ---------- musica de jefe ----------
+    // Sin archivo de audio (el juego sigue siendo un unico .html sin nada
+    // externo): un patron corto de bajo + percusion, hecho con las mismas
+    // tone()/noise() de los efectos, que se repite con setInterval mientras
+    // dure el combate. Al pararla no hace falta ningun fundido: simplemente
+    // se deja de programar el siguiente paso y la ultima nota ya sonando se
+    // apaga sola con su propia envolvente.
+    let bossMusicTimer = null, bossMusicStep = 0;
+    const BOSS_MUSIC_STEP = 0.16; // duracion de cada paso, en segundos
+    // Mi menor, ocho pasos: E2 E2 G2 E2 D2 E2 G2 A2
+    const BOSS_MUSIC_BASS = [82.41, 82.41, 98.00, 82.41, 73.42, 82.41, 98.00, 110.00];
+
+    function playBossMusicStep() {
+      const idx = bossMusicStep++;
+      tone({ type: 'square', f0: BOSS_MUSIC_BASS[idx % BOSS_MUSIC_BASS.length], dur: BOSS_MUSIC_STEP * 0.85, peak: 0.1 });
+      noise({ dur: 0.03, peak: 0.045, freq: 7000, filter: 'highpass' });
+      if (idx % 8 === 0) tone({ type: 'sine', f0: 52, dur: 0.2, peak: 0.22 });   // golpe en el primer tiempo
+      else if (idx % 8 === 4) tone({ type: 'sine', f0: 52, dur: 0.16, peak: 0.16 }); // y en el tercero
+      // Cada dos vueltas del patron, un acorde tenso para que no suene plano.
+      if (idx % 16 === 12) {
+        [246.94, 293.66, 349.23].forEach(f => tone({ type: 'sawtooth', f0: f, dur: 0.45, peak: 0.06 }));
+      }
+    }
+
+    return {
+      init,
+      isMuted: () => muted,
+      toggleMute() {
+        muted = !muted;
+        localStorage.setItem('cs_muted', muted ? '1' : '0');
+        return muted;
+      },
+
+      shoot(style) {
+        if (throttled('shoot', 45)) return;
+        const base = { bolt: 720, laser: 980, orb: 460, star: 840 }[style] || 720;
+        tone({ type: 'square', f0: base, f1: base * 0.45, dur: 0.07, peak: 0.11 });
+      },
+      hit() {
+        if (throttled('hit', 35)) return;
+        noise({ dur: 0.07, peak: 0.13, freq: 2600, freqTo: 900 });
+      },
+      enemyDie() {
+        if (throttled('enemyDie', 40)) return;
+        tone({ type: 'sawtooth', f0: 340, f1: 70, dur: 0.2, peak: 0.16 });
+        noise({ dur: 0.16, peak: 0.12, freq: 1500, freqTo: 300 });
+      },
+      bomberExplode() {
+        noise({ dur: 0.34, peak: 0.26, freq: 1000, freqTo: 120 });
+        tone({ type: 'sawtooth', f0: 190, f1: 45, dur: 0.3, peak: 0.2 });
+      },
+      hurt() {
+        if (throttled('hurt', 260)) return;
+        tone({ type: 'square', f0: 190, f1: 80, dur: 0.16, peak: 0.2 });
+        noise({ dur: 0.12, peak: 0.12, freq: 700, freqTo: 200 });
+      },
+      pickup() {
+        tone({ type: 'sine', f0: 660, dur: 0.09, peak: 0.2 });
+        tone({ type: 'sine', f0: 990, dur: 0.12, peak: 0.18, delay: 0.07 });
+      },
+      levelUp() {
+        [523, 659, 784, 1047].forEach((f, i) =>
+          tone({ type: 'triangle', f0: f, dur: 0.26, peak: 0.2, delay: i * 0.075 }));
+      },
+      wave() {
+        tone({ type: 'triangle', f0: 392, dur: 0.16, peak: 0.16 });
+        tone({ type: 'triangle', f0: 587, dur: 0.22, peak: 0.16, delay: 0.13 });
+      },
+      bossSpawn() {
+        tone({ type: 'sawtooth', f0: 55, f1: 120, dur: 1.5, peak: 0.3, attack: 0.25 });
+        tone({ type: 'square', f0: 110, f1: 220, dur: 1.2, peak: 0.14, delay: 0.15 });
+        noise({ dur: 1.4, peak: 0.2, freq: 200, freqTo: 2200 });
+      },
+      // El guard de "ya esta sonando" evita duplicar el bucle si el evento
+      // llegara dos veces (por ejemplo, un paquete de red repetido).
+      bossMusicStart() {
+        if (bossMusicTimer) return;
+        bossMusicStep = 0;
+        playBossMusicStep();
+        bossMusicTimer = setInterval(playBossMusicStep, BOSS_MUSIC_STEP * 1000);
+      },
+      bossMusicStop() {
+        clearInterval(bossMusicTimer);
+        bossMusicTimer = null;
+      },
+      bossHit() {
+        if (throttled('bossHit', 55)) return;
+        tone({ type: 'square', f0: 900, f1: 500, dur: 0.05, peak: 0.09 });
+      },
+      slam() {
+        tone({ type: 'sine', f0: 150, f1: 32, dur: 0.55, peak: 0.4 });
+        noise({ dur: 0.45, peak: 0.32, freq: 900, freqTo: 90 });
+      },
+      telegraph() {
+        if (throttled('telegraph', 300)) return;
+        tone({ type: 'square', f0: 300, dur: 0.07, peak: 0.1 });
+      },
+      laserCharge() {
+        tone({ type: 'sawtooth', f0: 90, f1: 1500, dur: 2.4, peak: 0.16, attack: 0.4 });
+      },
+      laserFire() {
+        noise({ dur: 1.2, peak: 0.34, freq: 3200, freqTo: 700, q: 3, filter: 'bandpass' });
+        tone({ type: 'sawtooth', f0: 260, f1: 150, dur: 1.1, peak: 0.2 });
+      },
+      summon() {
+        [400, 520, 660].forEach((f, i) =>
+          tone({ type: 'triangle', f0: f, f1: f * 1.5, dur: 0.2, peak: 0.15, delay: i * 0.06 }));
+      },
+      whoosh() {
+        noise({ dur: 0.42, peak: 0.26, freq: 380, freqTo: 2800, q: 2, filter: 'bandpass' });
+      },
+      meteor() {
+        if (throttled('meteor', 90)) return;
+        noise({ dur: 0.3, peak: 0.24, freq: 700, freqTo: 110 });
+        tone({ type: 'sine', f0: 120, f1: 40, dur: 0.32, peak: 0.24 });
+      },
+      phaseUp() {
+        tone({ type: 'sawtooth', f0: 160, f1: 640, dur: 0.9, peak: 0.3, attack: 0.05 });
+        noise({ dur: 0.8, peak: 0.24, freq: 500, freqTo: 3000 });
+      },
+      bossDie() {
+        noise({ dur: 2.0, peak: 0.42, freq: 1800, freqTo: 60 });
+        tone({ type: 'sawtooth', f0: 300, f1: 30, dur: 1.8, peak: 0.32 });
+        [660, 523, 392, 262].forEach((f, i) =>
+          tone({ type: 'triangle', f0: f, dur: 0.4, peak: 0.18, delay: 0.9 + i * 0.13 }));
+      },
+      gameOver() {
+        [440, 349, 262, 196].forEach((f, i) =>
+          tone({ type: 'triangle', f0: f, dur: 0.5, peak: 0.24, delay: i * 0.18 }));
+      },
+    };
+  })();
+
+  // Mientras este silenciado el aviso se queda puesto. Antes solo parpadeaba
+  // segundo y medio, asi que quien lo activaba sin querer no tenia forma de
+  // saber por que el juego habia dejado de sonar.
+  function refreshMuteIndicator(flash) {
+    const m = Sound.isMuted();
+    muteIndicator.textContent = m ? '🔇 Silenciado (M)' : '🔊 Sonido (M)';
+    clearTimeout(muteIndicator._t);
+    if (m || flash) {
+      muteIndicator.style.opacity = '1';
+      if (!m) muteIndicator._t = setTimeout(() => { muteIndicator.style.opacity = '0'; }, 1600);
+    } else {
+      muteIndicator.style.opacity = '0';
+    }
+  }
+
+  // La politica del navegador exige un gesto del usuario para arrancar el audio.
+  window.addEventListener('pointerdown', () => Sound.init(), { once: true });
+  window.addEventListener('keydown', e => {
+    if (e.key.toLowerCase() === 'm' && !escribiendo(e)) {
+      Sound.init();
+      Sound.toggleMute();
+      refreshMuteIndicator(true);
+    }
+  });
+  refreshMuteIndicator(false);
+
+  // El boton de espectar esta escondido hasta que se pulsa Y, para poder dar
+  // la sorpresa. No cambia nada de fondo: sigue pidiendo el mismo codigo de
+  // sala que el co-op, y el aviso de union se sigue viendo igual en la
+  // pantalla de los que juegan (ver queueSpecEvent).
+  window.addEventListener('keydown', e => {
+    if (e.key.toLowerCase() === 'y' && !escribiendo(e) && !overlay.classList.contains('hidden')) {
+      document.getElementById('spectate-btn').classList.remove('hidden');
+    }
+  });
+
+  // Los sonidos los dispara la simulacion, y la simulacion solo corre en el
+  // anfitrion: el que se une jugaba en silencio. Se apuntan aqui y viajan en
+  // el siguiente paquete para que los oiga tambien. El tope evita que una
+  // fase mala de un jefe mande cincuenta sonidos de golpe.
+  let sfxQueue = [];
+  const MAX_SFX_POR_PAQUETE = 12;
+
+  function sfx(name, arg) {
+    if (arg === undefined) Sound[name](); else Sound[name](arg);
+    if (currentRole !== 'host') return;
+    if (sfxQueue.length >= MAX_SFX_POR_PAQUETE) return;
+    sfxQueue.push(arg === undefined ? name : [name, arg]);
+  }
+
+  // ---------- espectador: avisos y chat ----------
+  // Igual que los sonidos, viajan en el siguiente paquete para que el
+  // companero tambien se entere. Nadie entra a escondidas: el aviso de
+  // union/salida se ve en la pantalla de quien juega, y el chat siempre
+  // lleva el nombre de quien escribe.
+  let specEventQueue = [];
+  let specChatQueue = [];
+  const MAX_SPEC_POR_PAQUETE = 6;
+
+  function queueSpecEvent(text) {
+    if (currentRole === 'host' && specEventQueue.length < MAX_SPEC_POR_PAQUETE) specEventQueue.push(text);
+    showSpecBanner(text);
+  }
+  function queueSpecChat(name, text) {
+    if (currentRole === 'host' && specChatQueue.length < MAX_SPEC_POR_PAQUETE) specChatQueue.push([name, text]);
+    showSpecChatToast(name, text);
+  }
+
+  let specBannerTimer = null;
+  function showSpecBanner(text) {
+    specBanner.textContent = text;
+    specBanner.classList.remove('hidden'); // el marcado empieza oculto con esta clase
+    specBanner.classList.add('show');
+    clearTimeout(specBannerTimer);
+    specBannerTimer = setTimeout(() => specBanner.classList.remove('show'), 3200);
+  }
+
+  let specChatTimer = null;
+  function showSpecChatToast(name, text) {
+    // textContent en los dos huecos: el nombre y el mensaje los manda un
+    // companero por la red, nunca deben interpretarse como HTML.
+    specChatToast.innerHTML = '<span class="spec-chat-name"></span><span class="spec-chat-text"></span>';
+    specChatToast.querySelector('.spec-chat-name').textContent = name;
+    specChatToast.querySelector('.spec-chat-text').textContent = text;
+    specChatToast.classList.remove('hidden');
+    specChatToast.classList.add('show');
+    clearTimeout(specChatTimer);
+    specChatTimer = setTimeout(() => specChatToast.classList.remove('show'), 4200);
+  }
+
+  // ---------- limites de seguridad ----------
+  // Sin estos topes, un jefe disparando en fase 3 puede acumular miles de
+  // proyectiles: la memoria se dispara, los bucles de colision se vuelven
+  // O(enemigos x balas) y el navegador acaba cerrando la pestana.
+  const MAX_BULLETS = 700;
+  const MAX_ENEMIES = 90;
+  const MAX_PARTICLES = 400;
+
+  function enforceLimits() {
+    // Se descartan los mas antiguos, que son los que llevan mas tiempo en vuelo.
+    if (bullets.length > MAX_BULLETS) bullets.splice(0, bullets.length - MAX_BULLETS);
+    if (particles.length > MAX_PARTICLES) particles.splice(0, particles.length - MAX_PARTICLES);
+    if (enemies.length > MAX_ENEMIES) enemies.splice(0, enemies.length - MAX_ENEMIES);
+  }
+
+  // ---------- version del juego ----------
+  // Cada jugador abre SU propia copia del archivo, asi que uno puede estar
+  // jugando con una version vieja: el anfitrion manda campos que el otro
+  // codigo no sabe leer y salen fallos raros (portales que no se ven, barras
+  // vacias...) sin ningun error en pantalla. Se avisa en el lobby.
+  // Subir este numero al cambiar lo que viaja en buildSnapshot().
+  const GAME_VERSION = 'salas-4';
+
+  function sameVersion(theirs) {
+    return theirs === GAME_VERSION;
+  }
+
+  function versionWarningText(theirs) {
+    return 'Aviso: tu compañero tiene otra versión del juego ('
+      + (theirs || 'una anterior a las salas') + ', tú tienes ' + GAME_VERSION
+      + '). Pasadle el archivo actualizado y recargad los dos, o habrá cosas que no se le vean.';
+  }
+  // Pinta el aviso en amarillo si las versiones no coinciden, o el texto
+  // normal si todo va bien. Devuelve si coincidian.
+  function setVersionStatus(el, theirs, okText) {
+    const ok = sameVersion(theirs);
+    el.textContent = ok ? okText : versionWarningText(theirs);
+    el.classList.toggle('warn', !ok);
+    return ok;
+  }
+
+  // ---------- networking state ----------
+  let currentRole = 'solo'; // 'solo' | 'host' | 'client' | 'spectator'
+  let peer = null, conn = null, lobbyOpen = true;
+  let allyInfo = null; // host: info about the connected client
+  let hostInfo = null; // client/spectator: info about the host
+  // Quien mira sin jugar: el anfitrion puede tener varios a la vez, a
+  // diferencia del companero (uno como mucho). Cada entrada es
+  // { conn, name }. No ocupan el hueco de companero ni lo necesitan.
+  let spectators = [];
+  // Solo estos tipos se pueden invocar desde el panel de espectador: una
+  // lista blanca evita que un mensaje con basura ("enemyType": cualquier
+  // cosa) haga explotar spawnEnemy() en pleno directo del anfitrion.
+  const SPEC_SPAWNABLE = ['grunt', 'fast', 'shooter', 'tank', 'bomber', 'sniper'];
+
+  // Si el canal de datos se satura o se cae, conn.send lanza una excepcion.
+  // Sin proteger, esa excepcion sube hasta el bucle principal y mata el
+  // juego. target es opcional: por defecto la conexion con el companero,
+  // pero sirve igual para mandarle algo a un espectador concreto.
+  function safeSend(payload, target = conn) {
+    if (!target || !target.open) return false;
+    try {
+      target.send(payload);
+      return true;
+    } catch (err) {
+      console.warn('[Red] No se pudo enviar el estado:', err);
+      return false;
+    }
+  }
+
+  function broadcastToSpectators(payload) {
+    for (const s of spectators) safeSend(payload, s.conn);
+  }
+
+  let remoteInput = { mx: 0, my: 0, aimAngle: 0, shooting: false };
+  let netSendTimer = 0;
+  let lastShownLevelUpId = 0;
+  let myUpgradeSent = false;
+  let clientGameOverShown = false;
+
+  // ---------- game state ----------
+  let running = false;
+  let me, ally, bullets, enemies, particles, pickups, score, spawnQueue, gameOverFlag;
+  let level; // numero de mejoras elegidas
+  let levelUpState = null, levelUpCounter = 0, levelUpDeadlockTimer = null;
+  let lastTime = 0;
+  let boss = null;        // objeto del jefe, o null si no hay
+  let shockwaves = [];    // ondas expansivas visuales (pisoton, muerte del jefe)
+  let beams = [];         // rayos laser activos
+  let meteors = [];       // zonas de impacto marcadas en el suelo
+  let nextEnemyId = 1;    // id estable para poder interpolar en el cliente
+
+  // ---------- mapa de salas ----------
+  const GRID = 6;
+  const ROOM_NONE = 0, ROOM_START = 1, ROOM_NORMAL = 2, ROOM_BONUS = 3, ROOM_BOSS = 4, ROOM_MINIBOSS = 5;
+
+  let galaxy = 1;
+  let roomGrid = [];          // roomGrid[y][x] = sala o null
+  let currentRoom = null;
+  let roomsCleared = 0;
+  let roomPhase = 'open';     // 'fight' = hay enemigos | 'reward' = eligiendo | 'open' = portales
+  let portals = [];
+  let galaxyPortal = null;
+  let portalCooldown = 0;     // evita rebotar al entrar por un portal
+  let pendingUpgrades = 0;    // las salas bonus dan mas de una mejora
+
+  function makeRoom(gx, gy, type) {
+    return { gx, gy, type, cleared: false, visited: false };
+  }
+
+  // Genera el piso: sala inicial en un borde, jefe en el opuesto, un camino
+  // entre ambas, y salas extra colgando del camino como recompensa opcional.
+  function generateMap() {
+    roomGrid = Array.from({ length: GRID }, () => Array(GRID).fill(null));
+
+    const startY = Math.floor(rand(0, GRID));
+    const bossY = Math.floor(rand(0, GRID));
+
+    // Camino desde la columna 0 hasta la ultima, avanzando y serpenteando.
+    const path = [];
+    let cx = 0, cy = startY;
+    path.push({ gx: cx, gy: cy });
+
+    while (cx < GRID - 1) {
+      if (Math.random() < 0.58 || cy === bossY) {
+        cx++;
+      } else {
+        const step = Math.sign(bossY - cy) || (Math.random() < 0.5 ? 1 : -1);
+        cy = clamp(cy + step, 0, GRID - 1);
+      }
+      path.push({ gx: cx, gy: cy });
+    }
+    // Ajuste final para acabar justo en la fila del jefe.
+    while (cy !== bossY) {
+      cy += Math.sign(bossY - cy);
+      path.push({ gx: cx, gy: cy });
+    }
+
+    for (const p of path) {
+      if (!roomGrid[p.gy][p.gx]) roomGrid[p.gy][p.gx] = makeRoom(p.gx, p.gy, ROOM_NORMAL);
+    }
+
+    roomGrid[startY][0].type = ROOM_START;
+    roomGrid[bossY][GRID - 1].type = ROOM_BOSS;
+
+    // Salas bonus colgando del camino (sin pisar inicio ni jefe).
+    const offsets = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+    let attempts = 0, added = 0;
+    const wanted = 4 + Math.floor(rand(0, 3));
+
+    while (added < wanted && attempts < 200) {
+      attempts++;
+      const base = path[Math.floor(rand(1, path.length - 1))];
+      const off = offsets[Math.floor(rand(0, 4))];
+      const nx = base.gx + off[0], ny = base.gy + off[1];
+
+      if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) continue;
+      if (roomGrid[ny][nx]) continue;
+
+      roomGrid[ny][nx] = makeRoom(nx, ny, ROOM_BONUS);
+      added++;
+    }
+
+    // Una sala de miniboss por piso, siempre: se reune TODA celda libre
+    // pegada al camino (en vez de tirar al azar y esperar acertar), asi no
+    // se queda sin sitio ni cuando las bonus ya han ocupado casi todo.
+    // Igual que las bonus, sin pisar inicio ni jefe: las extra siempre
+    // cuelgan de una sala normal, nunca de otra extra (si no, quedaria
+    // inalcanzable: ver isExtraRoomType() y el filtro en openPortals()).
+    function freeCellsNextTo(rooms) {
+      const found = new Map();
+      for (const r of rooms) {
+        for (const [dx, dy] of offsets) {
+          const nx = r.gx + dx, ny = r.gy + dy;
+          if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) continue;
+          if (roomGrid[ny][nx]) continue;
+          found.set(ny * GRID + nx, [nx, ny]);
+        }
+      }
+      return found;
+    }
+
+    let miniCandidates = freeCellsNextTo(path.slice(1, -1));
+    if (!miniCandidates.size) {
+      // No quedaba hueco junto al camino: se prueba junto a CUALQUIER sala
+      // que no sea extra (incluido inicio o jefe), mejor que arriesgarse a
+      // dejarla pegada solo a otra extra.
+      const noExtra = roomGrid.flat().filter(r => r && !isExtraRoomType(r.type));
+      miniCandidates = freeCellsNextTo(noExtra);
+    }
+    if (!miniCandidates.size) {
+      // Ultimo recurso: pegada a lo que sea, aunque sea otra extra. Sigue
+      // siendo mejor que una celda suelta sin ningun vecino (inalcanzable
+      // seguro), aunque no se pueda garantizar que se pueda entrar.
+      miniCandidates = freeCellsNextTo(roomGrid.flat().filter(Boolean));
+    }
+    if (miniCandidates.size) {
+      const options = [...miniCandidates.values()];
+      const [mx, my] = options[Math.floor(rand(0, options.length))];
+      roomGrid[my][mx] = makeRoom(mx, my, ROOM_MINIBOSS);
+    }
+
+    return roomGrid[startY][0];
+  }
+
+  function roomAt(gx, gy) {
+    if (gx < 0 || gy < 0 || gx >= GRID || gy >= GRID) return null;
+    return roomGrid[gy][gx];
+  }
+
+  // Las cuatro salidas de la sala actual, pegadas a cada borde del escenario.
+  const PORTAL_DIRS = [
+    { dx: 0, dy: -1, x: LOGICAL_W / 2, y: 64 },
+    { dx: 0, dy: 1, x: LOGICAL_W / 2, y: LOGICAL_H - 64 },
+    { dx: -1, dy: 0, x: 74, y: LOGICAL_H / 2 },
+    { dx: 1, dy: 0, x: LOGICAL_W - 74, y: LOGICAL_H / 2 },
+  ];
+
+  // Bonus y miniboss son "salas extra": solo se puede entrar en ellas desde
+  // una sala normal, nunca saltar de una extra a otra.
+  function isExtraRoomType(type) {
+    return type === ROOM_BONUS || type === ROOM_MINIBOSS;
+  }
+
+  function openPortals() {
+    portals = [];
+    if (!currentRoom) return;
+
+    const fromExtra = isExtraRoomType(currentRoom.type);
+    for (const dir of PORTAL_DIRS) {
+      const target = roomAt(currentRoom.gx + dir.dx, currentRoom.gy + dir.dy);
+      if (!target) continue;
+      if (fromExtra && isExtraRoomType(target.type)) continue;
+      portals.push({
+        x: dir.x, y: dir.y, r: 32,
+        gx: target.gx, gy: target.gy,
+        type: target.type,
+        cleared: target.cleared,
+      });
+    }
+  }
+
+
+  // Cuantos jugadores hay ahora mismo. Solo lo llama el anfitrion (el unico
+  // que genera enemigos), asi que "ally" siempre esta al dia.
+  function playerCount() {
+    return ally ? 2 : 1;
+  }
+
+  // El daño del grupo sube con cada jugador (cada uno dispara a su potencia
+  // completa), pero si la vida enemiga subiera al mismo ritmo el co-op no
+  // seria mas facil, solo mas largo. Con 2 jugadores: x1.5 en vez de x2.
+  function coopHpScale() {
+    return 1 + (playerCount() - 1) * 0.5;
+  }
+
+  function spawnRoomEnemies(room) {
+    const difficulty = (galaxy - 1) * 4 + roomsCleared;
+    const isBonus = room.type === ROOM_BONUS;
+    let count = 7 + Math.round(difficulty * 1.3);
+    // Mas dificil, mejor probabilidad de mejora (ver RARITY_WEIGHTS_EXTRA):
+    // no solo mas enemigos, tambien mas duros de lo que tocaria a este punto.
+    if (isBonus) count = Math.round(count * 2.1);
+
+    spawnQueue = [];
+    for (let i = 0; i < count; i++) spawnQueue.push(rollEnemyType(isBonus));
+    spawnQueue.spawnGap = Math.max(0.06, (isBonus ? 0.26 : 0.42) - difficulty * 0.012);
+    spawnQueue.timer = 0;
+  }
+
+  function enterRoom(room, fromDir) {
+    currentRoom = room;
+    room.visited = true;
+
+    // Limpieza total al cambiar de sala.
+    bullets = [];
+    enemies = [];
+    particles = [];
+    pickups = [];
+    beams = [];
+    meteors = [];
+    shockwaves = [];
+    boss = null;
+    portals = [];
+    galaxyPortal = null;
+    spawnQueue = [];
+    portalCooldown = 0.7;
+
+    // Aparecer por el lado contrario al portal usado, como en Isaac.
+    const entry = fromDir
+      ? { x: LOGICAL_W / 2 - fromDir.dx * (LOGICAL_W / 2 - 150), y: LOGICAL_H / 2 - fromDir.dy * (LOGICAL_H / 2 - 130) }
+      : { x: LOGICAL_W / 2, y: LOGICAL_H / 2 };
+
+    if (me) { me.x = entry.x - (ally ? 34 : 0); me.y = entry.y; }
+    if (ally) { ally.x = entry.x + 34; ally.y = entry.y; }
+
+    if (room.cleared || room.type === ROOM_START) {
+      room.cleared = true;
+      roomPhase = 'open';
+      openPortals();
+    } else if (room.type === ROOM_BOSS) {
+      roomPhase = 'fight';
+      spawnBoss();
+    } else if (room.type === ROOM_MINIBOSS) {
+      roomPhase = 'fight';
+      spawnMiniBoss();
+    } else {
+      roomPhase = 'fight';
+      spawnRoomEnemies(room);
+    }
+
+    updateHud();
+  }
+
+  function onRoomCleared() {
+    if (!currentRoom || currentRoom.cleared) return;
+
+    currentRoom.cleared = true;
+    roomsCleared++;
+    roomPhase = 'reward';
+
+    // Todas las salas dan una mejora; las extra (bonus y miniboss) la dan
+    // de mejor calidad en vez de darla por partida doble (ver offerUpgrade).
+    pendingUpgrades = 1;
+    sfx('wave');
+    offerUpgrade();
+  }
+
+  function onBossDefeated() {
+    if (!currentRoom) return;
+    currentRoom.cleared = true;
+    roomsCleared++;
+    roomPhase = 'reward';
+    pendingUpgrades = 2;
+    offerUpgrade();
+  }
+
+  function afterUpgradeChosen() {
+    pendingUpgrades--;
+    if (pendingUpgrades > 0) {
+      offerUpgrade();
+      return false; // queda otra eleccion, no reanudar todavia
+    }
+
+    roomPhase = 'open';
+    if (currentRoom && currentRoom.type === ROOM_BOSS) {
+      // Portal grande al centro que lleva a la siguiente galaxia.
+      galaxyPortal = { x: LOGICAL_W / 2, y: LOGICAL_H / 2, r: 62 };
+    } else {
+      openPortals();
+    }
+    return true;
+  }
+
+  function nextGalaxy() {
+    galaxy++;
+    roomsCleared = 0;
+    const start = generateMap();
+    enterRoom(start, null);
+    sfx('bossSpawn');
+    shockwaves.push({ x: LOGICAL_W / 2, y: LOGICAL_H / 2, r: 10, maxR: 700, life: 1.2, maxLife: 1.2, color: '#9fdcff' });
+  }
+
+  function updatePortals(dt, activePlayers) {
+    if (portalCooldown > 0) { portalCooldown -= dt; return; }
+    if (roomPhase !== 'open') return;
+
+    for (const p of activePlayers) {
+      if (p.dead) continue;
+
+      if (galaxyPortal && dist(p.x, p.y, galaxyPortal.x, galaxyPortal.y) < galaxyPortal.r + p.r) {
+        nextGalaxy();
+        return;
+      }
+
+      for (const portal of portals) {
+        if (dist(p.x, p.y, portal.x, portal.y) < portal.r + p.r) {
+          const dir = PORTAL_DIRS.find(d =>
+            currentRoom.gx + d.dx === portal.gx && currentRoom.gy + d.dy === portal.gy);
+          enterRoom(roomAt(portal.gx, portal.gy), dir);
+          sfx('pickup');
+          return;
+        }
+      }
+    }
+  }
+
+  function makePlayer(x, y, info) {
+    return {
+      x, y, r: 14, speed: 260, hp: 100, maxHp: 100,
+      fireRate: 0.14, dmg: 10, shotCount: 1, spread: 0.14, pierce: 0, bulletSpeed: 640, bulletLife: 1.2,
+      shootCooldown: 0, aim: 0, dead: false,
+      name: info.name, color: SKIN_MAP[info.skin] ? SKIN_MAP[info.skin].color : '#3d5afe',
+      projectile: PROJECTILE_MAP[info.projectile] ? info.projectile : 'bolt',
+    };
+  }
+
+  function resetGame(role, meInfo, allyInf) {
+    currentRole = role;
+    spectatorPanel.classList.toggle('hidden', role !== 'spectator');
+    if (role === 'host' && allyInf) {
+      me = makePlayer(LOGICAL_W / 2 - 40, LOGICAL_H / 2, meInfo);
+      ally = makePlayer(LOGICAL_W / 2 + 40, LOGICAL_H / 2, allyInf);
+    } else if (role === 'spectator') {
+      // No hay nave propia que mover: las dos que se ven llegan del
+      // anfitrion en cada foto del estado (ver applyState).
+      me = null;
+      ally = null;
+    } else {
+      me = makePlayer(LOGICAL_W / 2, LOGICAL_H / 2, meInfo);
+      ally = null;
+    }
+    bullets = [];
+    enemies = [];
+    particles = [];
+    pickups = [];
+    boss = null;
+    shockwaves = [];
+    beams = [];
+    meteors = [];
+    score = 0;
+    spawnQueue = [];
+    gameOverFlag = false;
+    level = 0;
+    levelUpState = null;
+    remoteInput = { mx: 0, my: 0, aimAngle: 0, shooting: false };
+    netSendTimer = 0;
+    clientGameOverShown = false;
+
+    // El piso se genera solo en el host o en solitario; el cliente lo recibe.
+    galaxy = 1;
+    roomsCleared = 0;
+    portals = [];
+    galaxyPortal = null;
+    pendingUpgrades = 0;
+    if (role === 'host' || role === 'solo') {
+      const start = generateMap();
+      enterRoom(start, null);
+    } else {
+      // client o spectator: el piso lo genera el anfitrion, aqui se recibe.
+      roomGrid = [];
+      currentRoom = null;
+      roomPhase = 'open';
+    }
+
+    updateHud();
+    updateBossHud();
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    galaxyEl.textContent = galaxy;
+    roomsEl.textContent = roomsCleared;
+    levelEl.textContent = level;
+    const pct = me ? clamp(me.hp / me.maxHp, 0, 1) * 100 : 0;
+    healthInner.style.width = pct + '%';
+    // La barra azul ahora marca el avance del piso: salas limpiadas del total.
+    const total = countRooms();
+    xpInner.style.width = (total ? clamp(roomsCleared / total, 0, 1) * 100 : 0) + '%';
+    if (ally) {
+      allyBarOuter.style.display = 'block';
+      allyBarInner.style.width = (clamp(ally.hp / ally.maxHp, 0, 1) * 100) + '%';
+    } else {
+      allyBarOuter.style.display = 'none';
+    }
+  }
+
+  function countRooms() {
+    let n = 0;
+    for (const row of roomGrid) for (const cell of row) if (cell) n++;
+    return n;
+  }
+
+  // ---------- mejoras ----------
+  function offerUpgrade() {
+    level++;
+    updateHud();
+    sfx('levelUp');
+    running = false;
+    levelUpCounter++;
+    // Las salas extra (bonus y miniboss) tienen mejores probabilidades de
+    // calidad, a cambio de dar solo una mejora en vez de dos.
+    const isExtraRoom = currentRoom && (currentRoom.type === ROOM_BONUS || currentRoom.type === ROOM_MINIBOSS);
+    const weights = isExtraRoom ? RARITY_WEIGHTS_EXTRA : RARITY_WEIGHTS_NORMAL;
+    const pool = pickUpgradeChoices(weights, 3);
+    levelUpState = {
+      id: levelUpCounter,
+      pool,
+      choices: pool.map(c => ({ name: c.name, desc: c.desc, rarity: c.rarity })),
+      readyMe: false,
+      readyAlly: !ally,
+    };
+    showLevelUpUI(levelUpState.choices, idx => chooseUpgrade('me', idx));
+    if (currentRole === 'host') broadcastSnapshot();
+
+    // Seguro anti-bloqueo: si la eleccion del companero nunca llega (mensaje
+    // perdido, desconexion silenciosa...), la partida continua sola en vez de
+    // quedarse congelada para siempre.
+    clearTimeout(levelUpDeadlockTimer);
+    if (ally) {
+      levelUpDeadlockTimer = setTimeout(() => {
+        if (!levelUpState) return;
+        console.warn('[Nivel] La eleccion del companero no llego; continuo la partida.');
+        levelUpState.readyAlly = true;
+        levelUpState.readyMe = true;
+        resumeAfterLevelUp();
+      }, 25000);
+    }
+  }
+
+  function chooseUpgrade(who, index) {
+    if (!levelUpState) return;
+    const choice = levelUpState.pool[index];
+    const target = who === 'me' ? me : ally;
+    if (choice && target) choice.apply(target);
+    if (who === 'me') levelUpState.readyMe = true; else levelUpState.readyAlly = true;
+    if (levelUpState.readyMe && levelUpState.readyAlly) {
+      resumeAfterLevelUp();
+    } else if (currentRole === 'host') {
+      broadcastSnapshot();
+    }
+  }
+
+  function resumeAfterLevelUp() {
+    if (!levelUpState) return;
+    if (!ally) levelUpState.readyAlly = true;
+    if (!(levelUpState.readyMe && levelUpState.readyAlly)) return;
+
+    clearTimeout(levelUpDeadlockTimer);
+    levelUpState = null;
+
+    // Las salas bonus dan dos mejoras: si queda otra, se vuelve a mostrar la
+    // pantalla en vez de reanudar la partida.
+    if (currentRole !== 'client' && !afterUpgradeChosen()) return;
+
+    levelupOverlay.classList.add('hidden');
+    running = true;
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function showLevelUpUI(choicesForDisplay, onPickOrTrue) {
+    levelupChoices.innerHTML = '';
+    levelupStatus.textContent = '';
+    choicesForDisplay.forEach((choice, idx) => {
+      const rarity = RARITY_META[choice.rarity] || RARITY_META.common;
+      const card = document.createElement('div');
+      card.className = 'upgrade-card rarity-' + (choice.rarity || 'common');
+      card.innerHTML = `<span class="rarity-tag">${rarity.label}</span><h3>${choice.name}</h3><p>${choice.desc}</p>`;
+      card.addEventListener('click', () => {
+        if (onPickOrTrue === true) {
+          if (myUpgradeSent) return;
+
+          // El envio puede fallar si el canal esta saturado (tipico justo
+          // despues de un jefe). Solo se bloquea la eleccion SI se envio bien;
+          // si falla, las cartas siguen activas para poder reintentar.
+          if (!safeSend({ t: 'upgrade', index: idx })) {
+            levelupStatus.textContent = 'Fallo al enviar. Pulsa otra vez.';
+            return;
+          }
+
+          myUpgradeSent = true;
+          Array.from(levelupChoices.children).forEach(c => c.style.pointerEvents = 'none');
+          card.style.opacity = '0.5';
+          levelupStatus.textContent = 'Esperando a tu companero...';
+        } else {
+          Array.from(levelupChoices.children).forEach(c => c.style.pointerEvents = 'none');
+          card.style.opacity = '0.5';
+          onPickOrTrue(idx);
+          if (levelUpState) levelupStatus.textContent = 'Esperando a tu companero...';
+        }
+      });
+      levelupChoices.appendChild(card);
+    });
+    levelupOverlay.classList.remove('hidden');
+  }
+
+  // Los tipos se van desbloqueando segun el avance del piso.
+  function rollEnemyType(isBonus) {
+    // En sala bonus se tira como si se llevara mas piso avanzado: entran
+    // antes los tipos duros y salen mas a menudo.
+    const progress = (galaxy - 1) * 5 + roomsCleared + (isBonus ? 6 : 0);
+    const roll = Math.random();
+    let acc = 0;
+    const table = [
+      { type: 'sniper',  chance: progress >= 6 ? 0.10 : 0 },
+      { type: 'bomber',  chance: progress >= 4 ? 0.14 : 0 },
+      { type: 'tank',    chance: progress >= 3 ? 0.12 : 0 },
+      { type: 'shooter', chance: progress >= 2 ? 0.16 : 0 },
+      { type: 'fast',    chance: progress >= 1 ? 0.26 : 0 },
+    ];
+    for (const entry of table) {
+      acc += entry.chance;
+      if (roll < acc) return entry.type;
+    }
+    return 'grunt';
+  }
+
+  // ---------- jefe ----------
+  function spawnBoss() {
+    const tier = galaxy;                          // un jefe por galaxia
+    const type = BOSS_TYPES[(tier - 1) % BOSS_TYPES.length];
+    // Mucha mas vida que antes y escalando mas fuerte con cada jefe.
+    const hp = 6000 * Math.pow(1.6, tier - 1) * coopHpScale();
+
+    boss = {
+      x: LOGICAL_W / 2,
+      y: 140,
+      r: 52,
+      hp, maxHp: hp,
+      name: type.name,
+      color: type.color,
+      accent: type.accent,
+      abilities: type.abilities,
+      tier,
+      speed: 58 + tier * 6,
+      phase: 1,
+      state: 'idle',
+      stateTimer: 1.6,   // respiro inicial antes de la primera habilidad
+      telegraph: 0,      // 0..1, aviso visual antes de atacar
+      spin: 0,
+      laser: null,
+      chargeVec: null,
+      spiralAngle: 0,
+      fireAccum: 0,
+      lastAbility: null,
+      novaStep: 0,
+      beamAngle: 0,
+    };
+
+    shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 380, life: 0.8, maxLife: 0.8, color: type.color });
+    sfx('bossSpawn');
+    sfx('bossMusicStart');
+    updateBossHud();
+  }
+
+  // ---------- miniboss ----------
+  // No es el jefe "boss": es un enemigo grande mas dentro de `enemies`, asi
+  // que reaprovecha toda su maquinaria (colision con balas, red, contencion
+  // en pantalla, sala superada al morir...) sin tener que duplicarla. Un
+  // poco mas facil que el jefe de su galaxia, y con ataques propios que el
+  // jefe no usa: rafaga apuntada en vez de abanico, embiste corta de un solo
+  // golpe en vez de rebotar en las paredes.
+  function spawnMiniBoss() {
+    const hp = 6000 * Math.pow(1.6, galaxy - 1) * coopHpScale() * 0.7;
+    enemies.push({
+      id: nextEnemyId++,
+      type: 'miniboss',
+      x: LOGICAL_W / 2, y: 140,
+      r: 34, speed: 95,
+      hp, maxHp: hp,
+      dmg: 30,
+      color: '#e0952a',
+      scoreVal: 200 * galaxy,
+      ranged: false,
+      entered: true,   // nace ya dentro, no hace falta que "entre"
+      state: 'chase',
+      stateTimer: rand(1.0, 1.6),
+      telegraph: 0,
+    });
+    shockwaves.push({ x: LOGICAL_W / 2, y: 140, r: 10, maxR: 300, life: 0.7, maxLife: 0.7, color: '#e0952a' });
+    sfx('bossSpawn');
+  }
+
+  // Alterna entre acercarse y cuatro ataques propios, ninguno igual a los
+  // del jefe: rafaga apuntada de 6 tiros, embestida corta de un solo golpe
+  // (sin rebotar en paredes como la del jefe), un abanico instantaneo de
+  // perdigones, y un pisoton en area que golpea a quien se quede cerca.
+  function updateMiniBoss(e, dt, ang, d, activePlayers) {
+    e.stateTimer -= dt;
+
+    if (e.state === 'chase') {
+      const desired = 230;
+      if (d > desired + 30) { e.x += Math.cos(ang) * e.speed * dt; e.y += Math.sin(ang) * e.speed * dt; }
+      else if (d < desired - 30) { e.x -= Math.cos(ang) * e.speed * dt * 0.6; e.y -= Math.sin(ang) * e.speed * dt * 0.6; }
+      if (e.stateTimer <= 0) {
+        const roll = Math.random();
+        if (roll < 0.3) { e.state = 'volleyTelegraph'; e.stateTimer = 0.5; }
+        else if (roll < 0.5) { e.state = 'lungeTelegraph'; e.stateTimer = 0.5; }
+        else if (roll < 0.78) { e.state = 'fanTelegraph'; e.stateTimer = 0.4; }
+        else { e.state = 'stompTelegraph'; e.stateTimer = 0.6; }
+      }
+    } else if (e.state === 'volleyTelegraph') {
+      e.telegraph = 1 - clamp(e.stateTimer / 0.5, 0, 1);
+      if (e.stateTimer <= 0) {
+        e.state = 'volley';
+        e.telegraph = 0;
+        e.volleyShots = 6;
+        e.fireCd = 0;
+      }
+    } else if (e.state === 'volley') {
+      e.fireCd -= dt;
+      while (e.fireCd <= 0 && e.volleyShots > 0) {
+        e.fireCd += 0.11;
+        e.volleyShots--;
+        const a = ang + rand(-0.12, 0.12);
+        bullets.push({ x: e.x, y: e.y, vx: Math.cos(a) * 360, vy: Math.sin(a) * 360, r: 6, life: 2.2, friendly: false, dmg: 11 });
+      }
+      if (e.volleyShots <= 0) { e.state = 'chase'; e.stateTimer = rand(1.1, 1.6); }
+    } else if (e.state === 'lungeTelegraph') {
+      e.telegraph = 1 - clamp(e.stateTimer / 0.5, 0, 1);
+      if (e.stateTimer <= 0) {
+        e.state = 'lunge';
+        e.telegraph = 0;
+        e.lungeVec = { x: Math.cos(ang), y: Math.sin(ang) };
+        e.stateTimer = 0.32;
+        sfx('whoosh');
+      }
+    } else if (e.state === 'lunge') {
+      e.x += e.lungeVec.x * e.speed * 3.4 * dt;
+      e.y += e.lungeVec.y * e.speed * 3.4 * dt;
+      if (e.stateTimer <= 0) { e.state = 'chase'; e.stateTimer = rand(1.1, 1.6); }
+    } else if (e.state === 'fanTelegraph') {
+      // Abanico instantaneo de perdigones: no es un anillo completo como el
+      // pisoton del jefe, solo cubre el frente hacia el jugador.
+      e.telegraph = 1 - clamp(e.stateTimer / 0.4, 0, 1);
+      if (e.stateTimer <= 0) {
+        e.telegraph = 0;
+        const count = 7, spread = 0.9;
+        for (let k = 0; k < count; k++) {
+          const a = ang - spread / 2 + (spread * k) / (count - 1);
+          bullets.push({ x: e.x, y: e.y, vx: Math.cos(a) * 300, vy: Math.sin(a) * 300, r: 6, life: 2, friendly: false, dmg: 8 });
+        }
+        e.state = 'chase';
+        e.stateTimer = rand(1.1, 1.6);
+      }
+    } else if (e.state === 'stompTelegraph') {
+      // Pisoton en area: no dispara nada, castiga a quien se quede pegado.
+      e.telegraph = 1 - clamp(e.stateTimer / 0.6, 0, 1);
+      if (e.stateTimer <= 0) {
+        e.telegraph = 0;
+        const radius = 130;
+        for (const p of activePlayers) {
+          if (p.dead) continue;
+          if (dist(e.x, e.y, p.x, p.y) < radius + p.r) damagePlayer(p, 26);
+        }
+        shockwaves.push({ x: e.x, y: e.y, r: 10, maxR: radius * 1.4, life: 0.4, maxLife: 0.4, color: e.color });
+        spawnParticles(e.x, e.y, e.color, 16);
+        sfx('slam');
+        e.state = 'chase';
+        e.stateTimer = rand(1.1, 1.6);
+      }
+    }
+  }
+
+  // Pausa entre habilidades: cada fase deja menos respiro.
+  function bossRest() {
+    return boss.phase === 3 ? 0.5 : (boss.phase === 2 ? 0.9 : 1.4);
+  }
+
+  function pickBossAbility() {
+    // No repetir la misma habilidad dos veces seguidas. Si el jefe solo
+    // tiene una (no deberia pasar con los repartos actuales), se repite.
+    const options = boss.abilities.filter(a => a !== boss.lastAbility);
+    if (!options.length) return boss.abilities[0];
+    return options[Math.floor(Math.random() * options.length)];
+  }
+
+  function bossStartAbility(name, activePlayers) {
+    boss.state = name;
+    boss.lastAbility = name;
+    boss.telegraph = 0;
+    boss.fireAccum = 0;
+
+    if (name === 'slam') {
+      boss.stateTimer = 0.9;                  // aviso, el golpe cae al final
+    } else if (name === 'laser') {
+      boss.stateTimer = 2.6;
+      // Orbes que van siendo absorbidos por el nucleo mientras crece.
+      const orbCount = 10 + boss.tier * 2;
+      const orbs = [];
+      for (let i = 0; i < orbCount; i++) {
+        orbs.push({
+          angle: rand(0, Math.PI * 2),
+          dist: rand(160, 300),
+          speed: rand(70, 130),
+          r: rand(4, 8),
+        });
+      }
+      boss.laser = { orbs, core: 8, absorbed: 0, angle: 0, firing: false, fireTimer: 0 };
+      sfx('laserCharge');
+    } else if (name === 'summon') {
+      boss.stateTimer = 1.2;
+    } else if (name === 'spiral') {
+      boss.stateTimer = 3.2;
+      boss.spiralAngle = rand(0, Math.PI * 2);
+    } else if (name === 'charge') {
+      boss.stateTimer = 0.8;                  // telegrafia, luego embiste
+      const target = nearestAlive(boss.x, boss.y, activePlayers);
+      const ang = Math.atan2(target.y - boss.y, target.x - boss.x);
+      boss.chargeVec = { x: Math.cos(ang), y: Math.sin(ang), dashing: false, dashTime: 0, bounced: false };
+    } else if (name === 'nova') {
+      boss.stateTimer = 2.4;
+      boss.novaStep = 0;
+    } else if (name === 'homing') {
+      boss.stateTimer = 2.2;
+    } else if (name === 'meteor') {
+      boss.stateTimer = 3.4;
+    } else if (name === 'crossbeam') {
+      boss.stateTimer = 3.6;
+      boss.beamAngle = rand(0, Math.PI * 2);
+      const arms = boss.phase === 3 ? 4 : 3;
+      for (let i = 0; i < arms; i++) {
+        beams.push({
+          x: boss.x, y: boss.y,
+          angle: boss.beamAngle + (i / arms) * Math.PI * 2,
+          width: 16,
+          life: 3.6, maxLife: 3.6,
+          color: boss.accent,
+          owner: 'boss',
+          rotating: true,
+          armIndex: i,
+          arms,
+        });
+      }
+      sfx('laserFire');
+    } else if (name === 'megaOrb') {
+      boss.stateTimer = 1.0;    // telegrafia antes de soltar el orbe
+    }
+  }
+
+  function bossFireBullet(x, y, angle, speed, r, dmg) {
+    bullets.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      r, life: 4, friendly: false, dmg: dmg || 8,
+    });
+  }
+
+  // Pisoton: el jefe golpea el suelo y salen bolitas en todas direcciones.
+  function bossSlam() {
+    const rings = boss.phase === 2 ? 2 : 1;
+    for (let ring = 0; ring < rings; ring++) {
+      const count = 26 + boss.tier * 4;
+      const offset = rand(0, Math.PI * 2);
+      const speed = 190 + ring * 70;
+      for (let i = 0; i < count; i++) {
+        const ang = offset + (i / count) * Math.PI * 2;
+        bossFireBullet(boss.x, boss.y, ang, speed, 7, 9);
+      }
+    }
+    shockwaves.push({ x: boss.x, y: boss.y, r: boss.r, maxR: 420, life: 0.5, maxLife: 0.5, color: boss.accent });
+    spawnParticles(boss.x, boss.y, boss.accent, 26);
+    sfx('slam');
+  }
+
+  function bossSummon() {
+    const count = 3 + boss.tier;
+    for (let i = 0; i < count; i++) {
+      const ang = (i / count) * Math.PI * 2;
+      const d = 90;
+      const scale = 1 + roomsCleared * 0.08;
+      const hp = 20 * scale;
+      enemies.push({
+        id: nextEnemyId++,
+        x: boss.x + Math.cos(ang) * d,
+        y: boss.y + Math.sin(ang) * d,
+        type: 'grunt',
+        r: 14,
+        speed: 95,
+        hp, maxHp: hp,
+        dmg: 10,
+        color: boss.accent,
+        scoreVal: 10,
+        ranged: false,
+        fireCd: rand(0.5, 1.5),
+      });
+    }
+    spawnParticles(boss.x, boss.y, boss.accent, 18);
+    sfx('summon');
+  }
+
+  function updateBoss(dt, activePlayers) {
+    if (!boss) return;
+
+    boss.spin += dt * 1.2;
+
+    // Tres fases: al 65% y al 30% de vida se vuelve mas agresivo.
+    if (boss.phase === 1 && boss.hp <= boss.maxHp * 0.65) {
+      boss.phase = 2;
+      boss.speed *= 1.3;
+      shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 380, life: 0.8, maxLife: 0.8, color: '#ffffff' });
+      spawnParticles(boss.x, boss.y, '#ffffff', 30);
+      sfx('phaseUp');
+    } else if (boss.phase === 2 && boss.hp <= boss.maxHp * 0.3) {
+      boss.phase = 3;
+      boss.speed *= 1.35;
+      shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 520, life: 1.0, maxLife: 1.0, color: '#ffd700' });
+      spawnParticles(boss.x, boss.y, '#ffd700', 45);
+      sfx('phaseUp');
+    }
+
+    const target = nearestAlive(boss.x, boss.y, activePlayers);
+    boss.stateTimer -= dt;
+
+    if (boss.state === 'idle') {
+      // Se reposiciona flotando hacia una distancia media del jugador.
+      const ang = Math.atan2(target.y - boss.y, target.x - boss.x);
+      const d = dist(boss.x, boss.y, target.x, target.y);
+      const desired = 260;
+      const dir = d > desired ? 1 : -1;
+      boss.x += Math.cos(ang) * boss.speed * dir * dt;
+      boss.y += Math.sin(ang) * boss.speed * dir * dt * 0.6;
+
+      if (boss.stateTimer <= 0) {
+        bossStartAbility(pickBossAbility(), activePlayers);
+      }
+    }
+
+    else if (boss.state === 'slam') {
+      boss.telegraph = 1 - clamp(boss.stateTimer / 0.9, 0, 1);
+      if (boss.stateTimer <= 0) {
+        bossSlam();
+        boss.state = 'idle';
+        boss.telegraph = 0;
+        boss.stateTimer = bossRest();
+      }
+    }
+
+    else if (boss.state === 'laser') {
+      const L = boss.laser;
+
+      if (!L.firing) {
+        // Los orbes se acercan al nucleo; al llegar, lo hacen crecer.
+        for (let i = L.orbs.length - 1; i >= 0; i--) {
+          const orb = L.orbs[i];
+          orb.dist -= orb.speed * dt;
+          orb.angle += dt * 1.4;
+          if (orb.dist <= boss.r * 0.5) {
+            L.orbs.splice(i, 1);
+            L.absorbed++;
+            L.core += 2.2;
+            spawnParticles(boss.x, boss.y, boss.accent, 3);
+          }
+        }
+        L.angle = Math.atan2(target.y - boss.y, target.x - boss.x);
+
+        if (boss.stateTimer <= 0) {
+          L.firing = true;
+          L.fireTimer = boss.phase === 2 ? 1.5 : 1.1;
+          beams.push({
+            x: boss.x, y: boss.y,
+            angle: L.angle,
+            width: L.core * 1.6,
+            life: L.fireTimer,
+            maxLife: L.fireTimer,
+            color: boss.accent,
+            owner: 'boss',
+          });
+          sfx('laserFire');
+        }
+      } else {
+        L.fireTimer -= dt;
+        // El rayo sigue saliendo del jefe mientras dura.
+        const beam = beams[beams.length - 1];
+        if (beam && beam.owner === 'boss') { beam.x = boss.x; beam.y = boss.y; }
+        if (L.fireTimer <= 0) {
+          boss.laser = null;
+          boss.state = 'idle';
+          boss.stateTimer = bossRest();
+        }
+      }
+    }
+
+    else if (boss.state === 'summon') {
+      boss.telegraph = 1 - clamp(boss.stateTimer / 1.2, 0, 1);
+      if (boss.stateTimer <= 0) {
+        bossSummon();
+        boss.state = 'idle';
+        boss.telegraph = 0;
+        boss.stateTimer = bossRest();
+      }
+    }
+
+    else if (boss.state === 'spiral') {
+      // Chorro giratorio continuo de proyectiles.
+      boss.spiralAngle += dt * (boss.phase === 2 ? 3.4 : 2.4);
+      boss.fireAccum += dt;
+      const interval = boss.phase === 2 ? 0.055 : 0.085;
+      while (boss.fireAccum >= interval) {
+        boss.fireAccum -= interval;
+        const arms = 3;
+        for (let a = 0; a < arms; a++) {
+          bossFireBullet(
+            boss.x, boss.y,
+            boss.spiralAngle + (a / arms) * Math.PI * 2,
+            230, 6, 7
+          );
+        }
+      }
+      if (boss.stateTimer <= 0) {
+        boss.state = 'idle';
+        boss.stateTimer = bossRest();
+      }
+    }
+
+    else if (boss.state === 'charge') {
+      const C = boss.chargeVec;
+      if (!C.dashing) {
+        boss.telegraph = 1 - clamp(boss.stateTimer / 0.8, 0, 1);
+        if (boss.stateTimer <= 0) {
+          C.dashing = true;
+          C.dashTime = 0.75;
+          boss.telegraph = 0;
+          sfx('whoosh');
+        }
+      } else {
+        C.dashTime -= dt;
+        const dashSpeed = 620;
+        boss.x += C.x * dashSpeed * dt;
+        boss.y += C.y * dashSpeed * dt;
+
+        // Rebota en el primer muro que toca, pero solo esa vez: al segundo
+        // golpe ya no invierte direccion, solo deja de empujar contra el
+        // muro (se desliza hasta frenar en vez de rebotar sin parar).
+        if (boss.x < boss.r) { boss.x = boss.r; C.x = C.bounced ? 0 : Math.abs(C.x); C.bounced = true; }
+        if (boss.x > LOGICAL_W - boss.r) { boss.x = LOGICAL_W - boss.r; C.x = C.bounced ? 0 : -Math.abs(C.x); C.bounced = true; }
+        if (boss.y < boss.r) { boss.y = boss.r; C.y = C.bounced ? 0 : Math.abs(C.y); C.bounced = true; }
+        if (boss.y > LOGICAL_H - boss.r) { boss.y = LOGICAL_H - boss.r; C.y = C.bounced ? 0 : -Math.abs(C.y); C.bounced = true; }
+
+        spawnParticles(boss.x, boss.y, boss.color, 2);
+
+        if (C.dashTime <= 0) {
+          boss.chargeVec = null;
+          boss.state = 'idle';
+          boss.stateTimer = bossRest();
+        }
+      }
+    }
+
+    // Nova: tres anillos de proyectiles en secuencia, cada uno rotado.
+    else if (boss.state === 'nova') {
+      const step = Math.floor((2.4 - boss.stateTimer) / 0.7);
+      if (step > boss.novaStep && step <= 3) {
+        boss.novaStep = step;
+        const count = 22 + boss.tier * 3;
+        const offset = step * 0.22;
+        for (let i = 0; i < count; i++) {
+          const a = offset + (i / count) * Math.PI * 2;
+          bossFireBullet(boss.x, boss.y, a, 165 + step * 45, 6, 8);
+        }
+        shockwaves.push({ x: boss.x, y: boss.y, r: boss.r, maxR: 260, life: 0.35, maxLife: 0.35, color: boss.accent });
+        sfx('slam');
+      }
+      if (boss.stateTimer <= 0) {
+        boss.state = 'idle';
+        boss.stateTimer = bossRest();
+      }
+    }
+
+    // Misiles teledirigidos que persiguen al jugador.
+    else if (boss.state === 'homing') {
+      boss.fireAccum += dt;
+      const interval = boss.phase === 3 ? 0.22 : 0.34;
+      while (boss.fireAccum >= interval) {
+        boss.fireAccum -= interval;
+        const a = rand(0, Math.PI * 2);
+        bullets.push({
+          x: boss.x, y: boss.y,
+          vx: Math.cos(a) * 120, vy: Math.sin(a) * 120,
+          r: 7, life: 5, friendly: false, dmg: 12,
+          homing: true, turnRate: 2.6, maxSpeed: 260,
+        });
+        sfx('telegraph');
+      }
+      if (boss.stateTimer <= 0) {
+        boss.state = 'idle';
+        boss.stateTimer = bossRest();
+      }
+    }
+
+    // Lluvia de meteoros: marca zonas en el suelo y luego explotan.
+    else if (boss.state === 'meteor') {
+      boss.fireAccum += dt;
+      const interval = boss.phase === 3 ? 0.2 : 0.32;
+      while (boss.fireAccum >= interval) {
+        boss.fireAccum -= interval;
+        const target = activePlayers[Math.floor(Math.random() * activePlayers.length)];
+        // Meteoritos grandes y pequeños mezclados: el pequeño cae rapido y
+        // avisa poco, el grande hace mucho mas dano pero da mas tiempo a huir.
+        const big = Math.random() < 0.35;
+        const warn = big ? 1.3 : 0.75;
+        meteors.push({
+          x: clamp(target.x + rand(-160, 160), 40, LOGICAL_W - 40),
+          y: clamp(target.y + rand(-160, 160), 40, LOGICAL_H - 40),
+          radius: big ? 100 : 42,
+          dmg: big ? 42 : 20,
+          warn, maxWarn: warn,   // tiempo de aviso antes de caer
+          exploded: false,
+          color: boss.accent,
+        });
+      }
+      if (boss.stateTimer <= 0) {
+        boss.state = 'idle';
+        boss.stateTimer = bossRest();
+      }
+    }
+
+    // Rayos giratorios: varios haces barriendo el escenario.
+    else if (boss.state === 'crossbeam') {
+      boss.beamAngle += dt * (boss.phase === 3 ? 1.15 : 0.75);
+      for (const beam of beams) {
+        if (!beam.rotating) continue;
+        beam.x = boss.x;
+        beam.y = boss.y;
+        beam.angle = boss.beamAngle + (beam.armIndex / beam.arms) * Math.PI * 2;
+      }
+      if (boss.stateTimer <= 0) {
+        for (let i = beams.length - 1; i >= 0; i--) {
+          if (beams[i].rotating) beams.splice(i, 1);
+        }
+        boss.state = 'idle';
+        boss.stateTimer = bossRest();
+      }
+    }
+
+    // Suelta un orbe grande que, a mitad de camino, se abre en tres orbes
+    // mas (ver el bloque "splitOrbs" en el bucle de balas de hostTick).
+    else if (boss.state === 'megaOrb') {
+      boss.telegraph = 1 - clamp(boss.stateTimer / 1.0, 0, 1);
+      if (boss.stateTimer <= 0) {
+        const a = Math.atan2(target.y - boss.y, target.x - boss.x);
+        bullets.push({
+          x: boss.x, y: boss.y,
+          vx: Math.cos(a) * 150, vy: Math.sin(a) * 150,
+          r: 20, life: 1.5, friendly: false, dmg: 16,
+          splitOrbs: true, color: boss.accent,
+        });
+        sfx('whoosh');
+        boss.state = 'idle';
+        boss.telegraph = 0;
+        boss.stateTimer = bossRest();
+      }
+    }
+
+    // Pitido de aviso mientras telegrafia un ataque (va limitado por tiempo).
+    if (boss.telegraph > 0) sfx('telegraph');
+
+    boss.x = clamp(boss.x, boss.r, LOGICAL_W - boss.r);
+    boss.y = clamp(boss.y, boss.r, LOGICAL_H - boss.r);
+
+    // Dano por contacto con el jefe.
+    for (const p of activePlayers) {
+      if (p.dead) continue;
+      if (dist(boss.x, boss.y, p.x, p.y) < boss.r + p.r) {
+        damagePlayer(p, 38 * dt);
+      }
+    }
+
+    // Balas del jugador contra el jefe.
+    for (let j = bullets.length - 1; j >= 0; j--) {
+      const b = bullets[j];
+      if (!b.friendly) continue;
+      if (dist(b.x, b.y, boss.x, boss.y) < boss.r + b.r) {
+        boss.hp -= b.dmg;
+        spawnParticles(b.x, b.y, boss.accent, 3);
+        sfx('bossHit');
+        if (b.pierce > 0) b.pierce--; else bullets.splice(j, 1);
+
+        if (boss.hp <= 0) {
+          score += 500 * boss.tier;
+          spawnParticles(boss.x, boss.y, boss.color, 60);
+          sfx('bossDie');
+          sfx('bossMusicStop');
+          shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 600, life: 1.1, maxLife: 1.1, color: boss.accent });
+          // Recompensa: curacion y experiencia por derrotarlo.
+          for (let k = 0; k < 4; k++) {
+            pickups.push({
+              x: boss.x + rand(-60, 60),
+              y: boss.y + rand(-60, 60),
+              r: 8, life: 12, heal: 25,
+            });
+          }
+          boss = null;
+          beams.length = 0;
+          meteors.length = 0;
+          onBossDefeated();
+          return;
+        }
+      }
+    }
+  }
+
+  // Distancia de un punto a un rayo semi-infinito (para el dano del laser).
+  function distanceToRay(px, py, ox, oy, angle) {
+    const dx = Math.cos(angle), dy = Math.sin(angle);
+    const t = (px - ox) * dx + (py - oy) * dy;
+    if (t < 0) return dist(px, py, ox, oy);
+    return Math.abs((px - ox) * dy - (py - oy) * dx);
+  }
+
+  function updateBeams(dt, activePlayers) {
+    for (let i = beams.length - 1; i >= 0; i--) {
+      const beam = beams[i];
+      beam.life -= dt;
+      if (beam.life <= 0) { beams.splice(i, 1); continue; }
+
+      // Solo hace dano cuando ya esta a pleno grosor (da margen para esquivar).
+      const ramp = clamp((beam.maxLife - beam.life) / 0.15, 0, 1);
+      if (ramp < 1) continue;
+
+      for (const p of activePlayers) {
+        if (p.dead) continue;
+        if (distanceToRay(p.x, p.y, beam.x, beam.y, beam.angle) < beam.width * 0.5 + p.r) {
+          damagePlayer(p, 42 * dt);
+        }
+      }
+    }
+  }
+
+  function updateMeteors(dt, activePlayers) {
+    for (let i = meteors.length - 1; i >= 0; i--) {
+      const m = meteors[i];
+      m.warn -= dt;
+      if (m.warn > 0) continue;
+
+      // Al agotarse el aviso, explota una sola vez y hace dano en su radio.
+      if (!m.exploded) {
+        m.exploded = true;
+        shockwaves.push({ x: m.x, y: m.y, r: 10, maxR: m.radius * 2.1, life: 0.4, maxLife: 0.4, color: m.color });
+        spawnParticles(m.x, m.y, m.color, 20);
+        sfx('meteor');
+
+        for (const p of activePlayers) {
+          if (p.dead) continue;
+          if (dist(m.x, m.y, p.x, p.y) < m.radius + p.r) damagePlayer(p, m.dmg || 34);
+        }
+      }
+      meteors.splice(i, 1);
+    }
+  }
+
+  function updateShockwaves(dt) {
+    for (let i = shockwaves.length - 1; i >= 0; i--) {
+      const s = shockwaves[i];
+      s.life -= dt;
+      if (s.life <= 0) { shockwaves.splice(i, 1); continue; }
+      const t = clamp(1 - s.life / s.maxLife, 0, 1);
+      s.r = s.maxR * t;
+    }
+  }
+
+  function updateBossHud() {
+    if (!boss) {
+      bossBar.classList.add('hidden');
+      return;
+    }
+    bossBar.classList.remove('hidden');
+    bossNameEl.textContent = boss.name;
+    bossBarInner.style.width = (clamp(boss.hp / boss.maxHp, 0, 1) * 100) + '%';
+
+    const label = boss.state !== 'idle' ? (ABILITY_LABEL[boss.state] || '') : '';
+    bossPhaseEl.textContent = boss.phase === 2
+      ? (label ? 'FASE 2  -  ' + label : 'FASE 2')
+      : label;
+  }
+
+  function spawnEnemy(type) {
+    const side = Math.floor(rand(0, 4));
+    let x, y;
+    const margin = 40;
+    if (side === 0) { x = -margin; y = rand(0, canvas.height); }
+    else if (side === 1) { x = canvas.width + margin; y = rand(0, canvas.height); }
+    else if (side === 2) { x = rand(0, canvas.width); y = -margin; }
+    else { x = rand(0, canvas.width); y = canvas.height + margin; }
+
+    const base = {
+      grunt:   { r: 16, speed: 78,  hp: 22, dmg: 10, color: '#ff5a5a', score: 10 },
+      fast:    { r: 11, speed: 168, hp: 14, dmg: 8,  color: '#ffd23c', score: 15 },
+      shooter: { r: 15, speed: 60,  hp: 28, dmg: 6,  color: '#c15aff', score: 25, ranged: true },
+      // Lento pero muy duro: obliga a moverse en vez de quedarse quieto.
+      tank:    { r: 24, speed: 42,  hp: 95, dmg: 18, color: '#8b2f2f', score: 45 },
+      // Al morir estalla en un anillo de proyectiles.
+      bomber:  { r: 14, speed: 105, hp: 20, dmg: 12, color: '#ff7b1a', score: 30, explodes: true },
+      // Dispara rapido, preciso y desde muy lejos.
+      sniper:  { r: 13, speed: 48,  hp: 24, dmg: 5,  color: '#4de1ff', score: 40, ranged: true, sniper: true },
+    }[type];
+
+    const scale = 1 + ((galaxy - 1) * 4 + roomsCleared) * 0.09;
+    const hp = base.hp * scale * coopHpScale();
+    enemies.push({
+      id: nextEnemyId++,
+      x, y, type,
+      r: base.r,
+      speed: base.speed * (1 + ((galaxy - 1) * 4 + roomsCleared) * 0.03),
+      hp, maxHp: hp,
+      entered: false, // aun no ha llegado dentro de la pantalla, ver [contencion de enemigos]
+      dmg: base.dmg,
+      color: base.color,
+      scoreVal: base.score,
+      ranged: !!base.ranged,
+      sniper: !!base.sniper,
+      explodes: !!base.explodes,
+      fireCd: rand(0.5, 1.5),
+    });
+  }
+
+  // Explosion del bomber al morir.
+  function explodeBomber(e) {
+    const count = 14;
+    for (let i = 0; i < count; i++) {
+      const ang = (i / count) * Math.PI * 2;
+      bullets.push({
+        x: e.x, y: e.y,
+        vx: Math.cos(ang) * 210, vy: Math.sin(ang) * 210,
+        r: 6, life: 2.2, friendly: false, dmg: 10,
+      });
+    }
+    spawnParticles(e.x, e.y, '#ff7b1a', 22);
+    shockwaves.push({ x: e.x, y: e.y, r: 6, maxR: 120, life: 0.35, maxLife: 0.35, color: '#ff7b1a' });
+    sfx('bomberExplode');
+  }
+
+  // ---------- particles ----------
+  function spawnParticles(x, y, color, count = 8) {
+    for (let i = 0; i < count; i++) {
+      const a = rand(0, Math.PI * 2);
+      const spd = rand(40, 180);
+      particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life: rand(0.25, 0.5), maxLife: 0.5, color });
+    }
+  }
+
+  function spawnPickup(x, y) {
+    if (Math.random() < 0.18) pickups.push({ x, y, r: 8, life: 8, heal: 20 });
+  }
+
+  // ---------- player helpers ----------
+  function localInput() {
+    let mx = 0, my = 0;
+    if (keys['w']) my -= 1;
+    if (keys['s']) my += 1;
+    if (keys['a']) mx -= 1;
+    if (keys['d']) mx += 1;
+    const refX = me ? me.x : canvas.width / 2;
+    const refY = me ? me.y : canvas.height / 2;
+    return { mx, my, aimAngle: Math.atan2(mouse.y - refY, mouse.x - refX), shooting: mouse.down };
+  }
+
+  function movePlayer(p, input, dt) {
+    const len = Math.hypot(input.mx, input.my) || 1;
+    p.x += (input.mx / len) * p.speed * dt;
+    p.y += (input.my / len) * p.speed * dt;
+    p.x = clamp(p.x, p.r, canvas.width - p.r);
+    p.y = clamp(p.y, p.r, canvas.height - p.r);
+    p.aim = input.aimAngle;
+  }
+
+  function tryShoot(p, input, dt) {
+    p.shootCooldown -= dt;
+    if (!input.shooting || p.shootCooldown > 0) return;
+    p.shootCooldown = p.fireRate;
+    const style = PROJECTILE_MAP[p.projectile] || PROJECTILE_MAP.bolt;
+    const count = p.shotCount;
+    const startAngle = input.aimAngle - p.spread * (count - 1) / 2;
+    sfx('shoot', p.projectile);
+    for (let i = 0; i < count; i++) {
+      const a = startAngle + p.spread * i;
+      bullets.push({
+        x: p.x + Math.cos(a) * (p.r + 6),
+        y: p.y + Math.sin(a) * (p.r + 6),
+        vx: Math.cos(a) * p.bulletSpeed,
+        vy: Math.sin(a) * p.bulletSpeed,
+        r: style.r, life: p.bulletLife, friendly: true, dmg: p.dmg, pierce: p.pierce, style: p.projectile,
+      });
+    }
+  }
+
+  function damagePlayer(p, amount) {
+    if (p.dead) return;
+    p.hp -= amount;
+    sfx('hurt');
+    if (p.hp <= 0) { p.hp = 0; p.dead = true; }
+  }
+
+  function nearestAlive(x, y, activePlayers) {
+    let best = null, bestD = Infinity;
+    for (const p of activePlayers) {
+      if (p.dead) continue;
+      const d = dist(x, y, p.x, p.y);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best || activePlayers[0];
+  }
+
+  // ---------- host/solo simulation ----------
+  function hostTick(dt) {
+    if (gameOverFlag) return;
+    const activePlayers = ally ? [me, ally] : [me];
+
+    const meInput = localInput();
+    if (!me.dead) { movePlayer(me, meInput, dt); tryShoot(me, meInput, dt); }
+    if (ally && !ally.dead) { movePlayer(ally, remoteInput, dt); tryShoot(ally, remoteInput, dt); }
+
+    // bullets
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      const b = bullets[i];
+
+      // Los misiles del jefe corrigen su rumbo hacia el jugador mas cercano.
+      if (b.homing) {
+        const t = nearestAlive(b.x, b.y, activePlayers);
+        if (t) {
+          const desired = Math.atan2(t.y - b.y, t.x - b.x);
+          let current = Math.atan2(b.vy, b.vx);
+          let diff = desired - current;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          current += clamp(diff, -b.turnRate * dt, b.turnRate * dt);
+          const speed = Math.min(b.maxSpeed, Math.hypot(b.vx, b.vy) + 190 * dt);
+          b.vx = Math.cos(current) * speed;
+          b.vy = Math.sin(current) * speed;
+        }
+      }
+
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.life -= dt;
+      const offscreen = b.x < -20 || b.x > canvas.width + 20 || b.y < -20 || b.y > canvas.height + 20;
+      if (b.life <= 0 || offscreen) {
+        // El orbe grande del megaOrb se abre en tres al llegar a su alcance
+        // maximo (pero no si se salio de la pantalla: no tiene sentido
+        // partirlo fuera de la vista).
+        if (b.splitOrbs && !offscreen) {
+          const baseAngle = rand(0, Math.PI * 2);
+          for (let k = 0; k < 3; k++) {
+            const a = baseAngle + (k / 3) * Math.PI * 2;
+            bullets.push({
+              x: b.x, y: b.y,
+              vx: Math.cos(a) * 230, vy: Math.sin(a) * 230,
+              r: 14, life: 2.6, friendly: false, dmg: 14, color: b.color,
+            });
+          }
+          spawnParticles(b.x, b.y, b.color, 22);
+          shockwaves.push({ x: b.x, y: b.y, r: 8, maxR: 90, life: 0.35, maxLife: 0.35, color: b.color });
+          sfx('meteor');
+        }
+        bullets.splice(i, 1);
+      }
+    }
+
+    // Aparicion escalonada de los enemigos de la sala.
+    if (spawnQueue.length) {
+      spawnQueue.timer -= dt;
+      if (spawnQueue.timer <= 0) {
+        spawnEnemy(spawnQueue.shift());
+        spawnQueue.timer = spawnQueue.spawnGap;
+      }
+    }
+
+    // Sala superada: sin cola pendiente, sin enemigos y sin jefe.
+    if (roomPhase === 'fight' && !spawnQueue.length && enemies.length === 0 && !boss) {
+      onRoomCleared();
+    }
+
+    updatePortals(dt, activePlayers);
+
+    // jefe
+    updateBoss(dt, activePlayers);
+    updateBeams(dt, activePlayers);
+    updateMeteors(dt, activePlayers);
+    updateShockwaves(dt);
+
+    // enemies
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const e = enemies[i];
+      const target = nearestAlive(e.x, e.y, activePlayers);
+      const ang = Math.atan2(target.y - e.y, target.x - e.x);
+      const d = dist(e.x, e.y, target.x, target.y);
+
+      if (e.type === 'miniboss') {
+        updateMiniBoss(e, dt, ang, d, activePlayers);
+        if (e.telegraph > 0) sfx('telegraph');
+      } else if (e.ranged) {
+        // El sniper se queda mucho mas lejos y dispara rapido y fuerte.
+        const keepDist = e.sniper ? 430 : 220;
+        if (d > keepDist + 20) { e.x += Math.cos(ang) * e.speed * dt; e.y += Math.sin(ang) * e.speed * dt; }
+        else if (d < keepDist - 20) { e.x -= Math.cos(ang) * e.speed * dt; e.y -= Math.sin(ang) * e.speed * dt; }
+        e.fireCd -= dt;
+        if (e.fireCd <= 0 && d < (e.sniper ? 900 : 500)) {
+          if (e.sniper) {
+            e.fireCd = rand(1.6, 2.4);
+            bullets.push({ x: e.x, y: e.y, vx: Math.cos(ang) * 620, vy: Math.sin(ang) * 620, r: 4, life: 3, friendly: false, dmg: 14 });
+          } else {
+            e.fireCd = rand(0.9, 1.6);
+            bullets.push({ x: e.x, y: e.y, vx: Math.cos(ang) * 330, vy: Math.sin(ang) * 330, r: 5, life: 2.5, friendly: false, dmg: 8 });
+          }
+        }
+      } else {
+        e.x += Math.cos(ang) * e.speed * dt;
+        e.y += Math.sin(ang) * e.speed * dt;
+      }
+
+      // [contencion de enemigos] Nacen fuera del escenario (por eso se les
+      // deja moverse libres hasta entrar), pero una vez dentro no pueden
+      // volver a salir: sobre todo lo necesitan los que disparan y retroceden
+      // (shooter, sniper), que si no acababan huyendo fuera de la pantalla.
+      if (!e.entered) {
+        if (e.x >= e.r && e.x <= canvas.width - e.r && e.y >= e.r && e.y <= canvas.height - e.r) e.entered = true;
+      } else {
+        e.x = clamp(e.x, e.r, canvas.width - e.r);
+        e.y = clamp(e.y, e.r, canvas.height - e.r);
+      }
+
+      // contact damage vs any alive player overlapping
+      for (const p of activePlayers) {
+        if (p.dead) continue;
+        if (dist(e.x, e.y, p.x, p.y) < e.r + p.r) damagePlayer(p, e.dmg * dt * 2.5);
+      }
+
+      // friendly bullets vs this enemy
+      for (let j = bullets.length - 1; j >= 0; j--) {
+        const b = bullets[j];
+        if (!b.friendly) continue;
+        if (dist(b.x, b.y, e.x, e.y) < e.r + b.r) {
+          e.hp -= b.dmg;
+          spawnParticles(b.x, b.y, e.color, 4);
+          sfx('hit');
+          if (b.pierce > 0) b.pierce--; else bullets.splice(j, 1);
+          if (e.hp <= 0) {
+            score += e.scoreVal;
+            spawnParticles(e.x, e.y, e.color, 14);
+            spawnPickup(e.x, e.y);
+            if (e.explodes) explodeBomber(e); else sfx('enemyDie');
+            enemies.splice(i, 1);
+          }
+          break;
+        }
+      }
+    }
+
+    // enemy bullets vs players
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      const b = bullets[i];
+      if (b.friendly) continue;
+      for (const p of activePlayers) {
+        if (p.dead) continue;
+        if (dist(b.x, b.y, p.x, p.y) < p.r + b.r) {
+          damagePlayer(p, b.dmg || 8);
+          bullets.splice(i, 1);
+          spawnParticles(p.x, p.y, '#3d5afe', 6);
+          break;
+        }
+      }
+    }
+
+    // particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.92; p.vy *= 0.92;
+      p.life -= dt;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // pickups
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      const pk = pickups[i];
+      pk.life -= dt;
+      let picked = false;
+      for (const p of activePlayers) {
+        if (p.dead) continue;
+        if (dist(pk.x, pk.y, p.x, p.y) < pk.r + p.r) { p.hp = clamp(p.hp + pk.heal, 0, p.maxHp); picked = true; sfx('pickup'); break; }
+      }
+      if (picked) { pickups.splice(i, 1); continue; }
+      if (pk.life <= 0) pickups.splice(i, 1);
+    }
+
+    if (!gameOverFlag && activePlayers.every(p => p.dead)) {
+      gameOverFlag = true;
+      if (boss) sfx('bossMusicStop'); // por si el grupo cae en plena pelea
+      showGameOver();
+      if (currentRole === 'host') broadcastSnapshot();
+      return;
+    }
+
+    enforceLimits();
+    updateHud();
+    updateBossHud();
+
+    if (!levelUpState && currentRole === 'host') {
+      netSendTimer += dt;
+      if (netSendTimer >= 0.05) {
+        netSendTimer = 0;
+        broadcastSnapshot();
+      }
+    }
+  }
+
+  // Redondear ahorra muchisimo espacio: un decimal como 483.21739130434787
+  // ocupa 18 caracteres frente a 3. Con cientos de balas 20 veces por segundo,
+  // esa diferencia es la que satura el canal de datos.
+  const r1 = v => Math.round(v);
+  const r2 = v => Math.round(v * 100) / 100;
+
+  function buildSnapshot() {
+    const paquete = {
+      t: 'state',
+      // Se manda tambien la velocidad para que el cliente pueda predecir su
+      // propio movimiento sin esperar al host.
+      me: { x: r1(me.x), y: r1(me.y), hp: r1(me.hp), maxHp: me.maxHp, aim: r2(me.aim), dead: me.dead, name: me.name, color: me.color, speed: r1(me.speed), r: me.r },
+      ally: ally ? { x: r1(ally.x), y: r1(ally.y), hp: r1(ally.hp), maxHp: ally.maxHp, aim: r2(ally.aim), dead: ally.dead, name: ally.name, color: ally.color, speed: r1(ally.speed), r: ally.r } : null,
+      // Arrays planos de numeros en vez de objetos: un objeto repite el nombre
+      // de cada campo por cada elemento ("x","y","r","friendly","style"...),
+      // lo que con cientos de balas multiplica el tamano del paquete.
+      // Enemigo: [id, x, y, r, hp, maxHp, indiceColor, telegraph]
+      en: enemies.flatMap(e => [
+        e.id, r1(e.x), r1(e.y), e.r, r1(e.hp), r1(e.maxHp),
+        NET_COLOR_INDEX[e.color] !== undefined ? NET_COLOR_INDEX[e.color] : 0,
+        r2(e.telegraph || 0),
+      ]),
+      // Bala: [x, y, vx, vy, r, estilo]  (estilo -1 = bala enemiga normal;
+      // -2 o menos = bala enemiga con color propio, indexado en NET_COLORS:
+      // -(2+indice). El megaOrb y sus tres hijos son los unicos que lo usan.
+      bu: bullets.flatMap(b => {
+        let style = -1;
+        if (b.friendly) style = PROJECTILE_IDS.indexOf(b.style);
+        else if (b.color !== undefined && NET_COLOR_INDEX[b.color] !== undefined) style = -(2 + NET_COLOR_INDEX[b.color]);
+        return [r1(b.x), r1(b.y), r1(b.vx), r1(b.vy), b.r, style];
+      }),
+      pickups: pickups.map(p => ({ x: r1(p.x), y: r1(p.y), r: p.r, life: r2(p.life) })),
+      boss: boss ? {
+        x: r1(boss.x), y: r1(boss.y), r: boss.r,
+        hp: r1(boss.hp), maxHp: r1(boss.maxHp),
+        name: boss.name, color: boss.color, accent: boss.accent,
+        phase: boss.phase, state: boss.state,
+        telegraph: r2(boss.telegraph), spin: r2(boss.spin),
+        laser: boss.laser ? {
+          core: r2(boss.laser.core),
+          firing: boss.laser.firing,
+          angle: r2(boss.laser.angle),
+          orbs: boss.laser.orbs.map(o => ({ angle: r2(o.angle), dist: r1(o.dist), r: r1(o.r) })),
+        } : null,
+      } : null,
+      beams: beams.map(b => ({
+        x: r1(b.x), y: r1(b.y), angle: r2(b.angle), width: r2(b.width),
+        life: r2(b.life), maxLife: r2(b.maxLife), color: b.color,
+      })),
+      shockwaves: shockwaves.map(s => ({
+        x: r1(s.x), y: r1(s.y), r: r1(s.r), life: r2(s.life), maxLife: r2(s.maxLife), color: s.color,
+      })),
+      meteors: meteors.map(m => ({
+        x: r1(m.x), y: r1(m.y), radius: m.radius, warn: r2(m.warn), maxWarn: m.maxWarn, color: m.color,
+      })),
+      // Mapa comprimido: un numero por celda (tipo + banderas).
+      map: roomGrid.flat().map(r =>
+        r ? r.type + (r.cleared ? 8 : 0) + (r.visited ? 16 : 0) : 0),
+      cur: currentRoom ? [currentRoom.gx, currentRoom.gy] : null,
+      // Portal: [x, y, r, tipoSala, limpiada]
+      po: portals.flatMap(p => [r1(p.x), r1(p.y), p.r, p.type, p.cleared ? 1 : 0]),
+      gp: galaxyPortal ? [r1(galaxyPortal.x), r1(galaxyPortal.y), galaxyPortal.r] : null,
+      score, level, galaxy, roomsCleared,
+      gameOver: gameOverFlag,
+      levelUp: levelUpState ? { id: levelUpState.id, choices: levelUpState.choices, readyMe: levelUpState.readyMe, readyAlly: levelUpState.readyAlly } : null,
+      // Sonidos que ha disparado la simulacion desde el paquete anterior.
+      sfx: sfxQueue,
+      // Avisos de espectador (union/salida) y mensajes de chat pendientes.
+      spec: specEventQueue,
+      chat: specChatQueue,
+    };
+    sfxQueue = [];
+    specEventQueue = [];
+    specChatQueue = [];
+    return paquete;
+  }
+
+  // Una sola foto para el companero Y para todos los espectadores: si se
+  // llamara a buildSnapshot() por separado para cada uno, la segunda vez ya
+  // habria vaciado las colas de sonido/chat y la primera se las quedaria todas.
+  function broadcastSnapshot() {
+    const snap = buildSnapshot();
+    safeSend(snap);
+    if (spectators.length) broadcastToSpectators(snap);
+  }
+
+  // ---------- client (thin: sends input, renders host state) ----------
+  // El cliente ya no se limita a esperar las posiciones del host 20 veces por
+  // segundo (lo que se veia como ir a 20 FPS). Ahora, cada fotograma:
+  //   1. Mueve SU nave inmediatamente con su propia entrada (prediccion).
+  //   2. Avanza las balas con su velocidad conocida (extrapolacion).
+  //   3. Desliza enemigos, jefe y companero hacia la ultima posicion recibida.
+  // El host sigue mandando; cuando llega, se corrige suavemente.
+  function clientTick(dt) {
+    if (gameOverFlag) return;
+
+    const inp = localInput();
+    safeSend({ t: 'input', mx: inp.mx, my: inp.my, aim: inp.aimAngle, shooting: inp.shooting });
+
+    // 1. Prediccion del movimiento propio: respuesta inmediata al teclado.
+    if (me && !me.dead && me.speed) {
+      movePlayer(me, { mx: inp.mx, my: inp.my, aimAngle: inp.aimAngle }, dt);
+    }
+
+    // 2. Las balas van en linea recta, asi que se pueden extrapolar exacto.
+    for (const b of bullets) {
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+    }
+
+    // 3. Suavizado del resto hacia su objetivo de red.
+    const smooth = Math.min(1, dt * 14);
+    for (const e of enemies) {
+      if (e.tx === undefined) continue;
+      e.x += (e.tx - e.x) * smooth;
+      e.y += (e.ty - e.y) * smooth;
+    }
+    if (ally && ally.tx !== undefined) {
+      ally.x += (ally.tx - ally.x) * smooth;
+      ally.y += (ally.ty - ally.y) * smooth;
+    }
+    if (boss && boss.tx !== undefined) {
+      boss.x += (boss.tx - boss.x) * smooth;
+      boss.y += (boss.ty - boss.y) * smooth;
+      boss.spin += dt * 1.2;
+    }
+  }
+
+  // No hay nave que mover ni entrada que mandar: las dos naves que se ven
+  // (la del anfitrion y la de su companero, si lo tiene) se tratan igual,
+  // deslizandose hacia su posicion real, sin prediccion propia.
+  function spectatorTick(dt) {
+    if (gameOverFlag) return;
+
+    for (const b of bullets) {
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+    }
+
+    const smooth = Math.min(1, dt * 14);
+    for (const e of enemies) {
+      if (e.tx === undefined) continue;
+      e.x += (e.tx - e.x) * smooth;
+      e.y += (e.ty - e.y) * smooth;
+    }
+    if (me && me.tx !== undefined) {
+      me.x += (me.tx - me.x) * smooth;
+      me.y += (me.ty - me.y) * smooth;
+    }
+    if (ally && ally.tx !== undefined) {
+      ally.x += (ally.tx - ally.x) * smooth;
+      ally.y += (ally.ty - ally.y) * smooth;
+    }
+    if (boss && boss.tx !== undefined) {
+      boss.x += (boss.tx - boss.x) * smooth;
+      boss.y += (boss.ty - boss.y) * smooth;
+      boss.spin += dt * 1.2;
+    }
+  }
+
+  function applyState(s) {
+    // ---- Mi nave: el host manda, pero no se pisa la prediccion ----
+    // Se corrige de golpe solo si la diferencia es grande (un empujon, una
+    // muerte...). Si es pequena se desliza, para que no de tirones. El
+    // espectador no predice nada propio (no controla ninguna nave), asi que
+    // esta se trata igual que la del companero: solo se desliza.
+    const hostMe = s.ally; // desde el host, yo soy su "ally"
+    if (currentRole === 'spectator') {
+      if (hostMe) {
+        if (!me) me = { ...hostMe };
+        else Object.assign(me, hostMe, { x: me.x, y: me.y });
+        me.tx = hostMe.x;
+        me.ty = hostMe.y;
+      } else {
+        me = null;
+      }
+    } else if (hostMe) {
+      if (!me || me.x === undefined) {
+        me = { ...hostMe };
+      } else {
+        const error = dist(me.x, me.y, hostMe.x, hostMe.y);
+        if (error > 110) {
+          me.x = hostMe.x;
+          me.y = hostMe.y;
+        } else {
+          me.x += (hostMe.x - me.x) * 0.2;
+          me.y += (hostMe.y - me.y) * 0.2;
+        }
+        me.hp = hostMe.hp;
+        me.maxHp = hostMe.maxHp;
+        me.dead = hostMe.dead;
+        me.name = hostMe.name;
+        me.color = hostMe.color;
+        me.speed = hostMe.speed;
+        me.r = hostMe.r;
+      }
+    }
+
+    // ---- Companero: se guarda como objetivo y se desliza en clientTick ----
+    if (s.me) {
+      if (!ally) ally = { ...s.me };
+      else Object.assign(ally, s.me, { x: ally.x, y: ally.y });
+      ally.tx = s.me.x;
+      ally.ty = s.me.y;
+    } else {
+      ally = null;
+    }
+
+    // ---- Enemigos: se reutilizan por id para poder interpolarlos ----
+    if (s.en) {
+      const previous = new Map(enemies.map(e => [e.id, e]));
+      const rebuilt = [];
+      for (let i = 0; i < s.en.length; i += 8) {
+        const id = s.en[i];
+        const existing = previous.get(id);
+        const enemy = existing || { id, x: s.en[i + 1], y: s.en[i + 2] };
+        enemy.tx = s.en[i + 1];
+        enemy.ty = s.en[i + 2];
+        enemy.r = s.en[i + 3];
+        enemy.hp = s.en[i + 4];
+        enemy.maxHp = s.en[i + 5];
+        enemy.color = NET_COLORS[s.en[i + 6]] || NET_COLORS[0];
+        enemy.telegraph = s.en[i + 7];
+        rebuilt.push(enemy);
+      }
+      enemies = rebuilt;
+    }
+
+    // ---- Balas: llegan con velocidad para poder extrapolarlas ----
+    if (s.bu) {
+      const rebuilt = [];
+      // El paquete viaja con retraso, asi que se adelanta medio intervalo de
+      // envio. Reparte el error a ambos lados en vez de acumularlo.
+      const lead = 0.025;
+      for (let i = 0; i < s.bu.length; i += 6) {
+        const styleIndex = s.bu[i + 5];
+        rebuilt.push({
+          x: s.bu[i] + s.bu[i + 2] * lead, y: s.bu[i + 1] + s.bu[i + 3] * lead,
+          vx: s.bu[i + 2], vy: s.bu[i + 3],
+          r: s.bu[i + 4],
+          friendly: styleIndex >= 0,
+          style: styleIndex >= 0 ? PROJECTILE_IDS[styleIndex] : undefined,
+          color: styleIndex <= -2 ? NET_COLORS[-(styleIndex + 2)] : undefined,
+        });
+      }
+      bullets = rebuilt;
+    }
+
+    pickups = s.pickups;
+
+    // ---- Jefe: tambien se desliza en vez de saltar ----
+    if (s.boss) {
+      const previousBoss = boss;
+      boss = s.boss;
+      boss.tx = s.boss.x;
+      boss.ty = s.boss.y;
+      if (previousBoss && previousBoss.x !== undefined) {
+        boss.x = previousBoss.x;
+        boss.y = previousBoss.y;
+        boss.spin = previousBoss.spin;
+      }
+    } else {
+      boss = null;
+    }
+
+    beams = s.beams || [];
+    shockwaves = s.shockwaves || [];
+    meteors = s.meteors || [];
+    score = s.score; level = s.level; galaxy = s.galaxy; roomsCleared = s.roomsCleared;
+
+    // ---- Mapa de salas, portales y minimapa: manda el anfitrion ----
+    // El mapa viaja comprimido a un numero por celda: tipo en los 3 bits
+    // bajos, +8 si esta limpiada y +16 si ya se ha visitado.
+    if (s.map) {
+      roomGrid = Array.from({ length: GRID }, (_, gy) =>
+        Array.from({ length: GRID }, (_, gx) => {
+          const code = s.map[gy * GRID + gx];
+          if (!code) return null;
+          return {
+            gx, gy,
+            type: code & 7,
+            cleared: (code & 8) !== 0,
+            visited: (code & 16) !== 0,
+          };
+        }));
+    }
+    currentRoom = s.cur ? roomAt(s.cur[0], s.cur[1]) : null;
+
+    // Portal: [x, y, r, tipoSala, limpiada]
+    portals = [];
+    if (s.po) {
+      for (let i = 0; i < s.po.length; i += 5) {
+        portals.push({
+          x: s.po[i], y: s.po[i + 1], r: s.po[i + 2],
+          type: s.po[i + 3], cleared: s.po[i + 4] === 1,
+        });
+      }
+    }
+    galaxyPortal = s.gp ? { x: s.gp[0], y: s.gp[1], r: s.gp[2] } : null;
+
+    // Sonidos del anfitrion. Se comprueba que existan por si el companero
+    // tiene otra version y manda alguno que aqui no esta.
+    if (s.sfx) {
+      for (const ev of s.sfx) {
+        const name = Array.isArray(ev) ? ev[0] : ev;
+        if (typeof Sound[name] !== 'function') continue;
+        if (Array.isArray(ev)) Sound[name](ev[1]); else Sound[name]();
+      }
+    }
+    if (s.spec) for (const text of s.spec) showSpecBanner(text);
+    if (s.chat) for (const [name, text] of s.chat) showSpecChatToast(name, text);
+
+    updateBossHud();
+
+    if (s.gameOver && !clientGameOverShown) {
+      clientGameOverShown = true;
+      gameOverFlag = true;
+      running = false;
+      showGameOver();
+    }
+
+    // El espectador no elige mejoras (no controla ninguna nave): se le
+    // deja fuera de esta pantalla, solo ven la eleccion los que juegan.
+    if (currentRole !== 'spectator') {
+      if (s.levelUp) {
+        if (lastShownLevelUpId !== s.levelUp.id) {
+          lastShownLevelUpId = s.levelUp.id;
+          myUpgradeSent = false;
+          showLevelUpUI(s.levelUp.choices, true);
+        }
+        if (!myUpgradeSent && s.levelUp.readyMe) {
+          levelupStatus.textContent = 'Your teammate is ready — pick yours!';
+        } else if (!myUpgradeSent) {
+          levelupStatus.textContent = '';
+        }
+        levelupOverlay.classList.remove('hidden');
+      } else {
+        levelupOverlay.classList.add('hidden');
+      }
+    }
+
+    updateHud();
+  }
+
+  // ---------- draw ----------
+  function drawGrid() {
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 1;
+    const step = 48;
+    for (let x = 0; x < canvas.width; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
+    for (let y = 0; y < canvas.height; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+  }
+
+  function drawStar(cx, cy, r) {
+    const spikes = 5, step = Math.PI / spikes;
+    ctx.beginPath();
+    for (let i = 0; i < spikes * 2; i++) {
+      const rad = i % 2 === 0 ? r : r / 2.3;
+      const a = i * step - Math.PI / 2;
+      const x = cx + Math.cos(a) * rad, y = cy + Math.sin(a) * rad;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawProjectile(b) {
+    const style = PROJECTILE_MAP[b.style] || PROJECTILE_MAP.bolt;
+    ctx.save();
+    ctx.fillStyle = style.color;
+    ctx.strokeStyle = style.color;
+    ctx.shadowColor = style.color;
+    ctx.shadowBlur = 8;
+    if (style.shape === 'line') {
+      ctx.translate(b.x, b.y);
+      ctx.rotate(Math.atan2(b.vy, b.vx));
+      ctx.lineWidth = style.width || 3;
+      ctx.beginPath();
+      ctx.moveTo(-(style.length || 20) / 2, 0);
+      ctx.lineTo((style.length || 20) / 2, 0);
+      ctx.stroke();
+    } else if (style.shape === 'star') {
+      drawStar(b.x, b.y, style.r || 6);
+    } else if (style.shape === 'baguette') {
+      // Capsula alargada (cuerpo del pan) con unos greños diagonales encima,
+      // como los cortes de una baguette de verdad.
+      ctx.translate(b.x, b.y);
+      ctx.rotate(Math.atan2(b.vy, b.vx));
+      const len = style.length || 26, hw = (style.width || 9) / 2;
+      ctx.beginPath();
+      ctx.moveTo(-len / 2 + hw, -hw);
+      ctx.lineTo(len / 2 - hw, -hw);
+      ctx.arc(len / 2 - hw, 0, hw, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(-len / 2 + hw, hw);
+      ctx.arc(-len / 2 + hw, 0, hw, Math.PI / 2, -Math.PI / 2);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = style.accent || '#7a4a1f';
+      ctx.lineWidth = 1.5;
+      const cuts = 4;
+      for (let i = 0; i < cuts; i++) {
+        const cx = -len / 2 + hw * 1.6 + (i + 0.5) * ((len - hw * 3.2) / cuts);
+        ctx.beginPath();
+        ctx.moveTo(cx - 3, -hw * 0.7);
+        ctx.lineTo(cx + 3, hw * 0.7);
+        ctx.stroke();
+      }
+    } else {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, style.r || b.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawShip(p, ang) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(ang);
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.moveTo(18, 0);
+    ctx.lineTo(-12, 10);
+    ctx.lineTo(-6, 0);
+    ctx.lineTo(-12, -10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    if (p.name) {
+      ctx.save();
+      ctx.font = '12px Segoe UI, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 4;
+      ctx.fillText(p.name, p.x, p.y - p.r - 14);
+      ctx.restore();
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawGrid();
+
+    for (const pk of pickups) {
+      ctx.save();
+      ctx.globalAlpha = clamp(pk.life / 2, 0.3, 1);
+      ctx.fillStyle = '#3cff8f';
+      ctx.shadowColor = '#3cff8f';
+      ctx.shadowBlur = 12;
+      ctx.beginPath(); ctx.arc(pk.x, pk.y, pk.r, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    for (const p of particles) {
+      ctx.save();
+      ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    for (const b of bullets) {
+      if (!b.friendly) {
+        // Casi todo el fuego enemigo es naranja generico; el orbe grande (y
+        // sus tres hijos) llevan el color del jefe para distinguirse.
+        const col = b.color || '#ff9a3c';
+        ctx.fillStyle = col;
+        ctx.shadowColor = col;
+        ctx.shadowBlur = 8;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+      } else {
+        drawProjectile(b);
+      }
+    }
+
+    for (const e of enemies) {
+      // Aviso previo del miniboss: mismo lenguaje visual que el del jefe
+      // (anillo rojo que se cierra), para que sus golpes tambien se puedan
+      // esquivar en vez de ser un mordisco silencioso.
+      if (e.telegraph > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.25 + e.telegraph * 0.5;
+        ctx.strokeStyle = '#ff3b3b';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([10, 8]);
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.r + 40 * (1 - e.telegraph) + 10, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2); ctx.fill();
+      const w = e.r * 2;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(e.x - w / 2, e.y - e.r - 10, w, 4);
+      ctx.fillStyle = '#3cff8f';
+      ctx.fillRect(e.x - w / 2, e.y - e.r - 10, w * clamp(e.hp / e.maxHp, 0, 1), 4);
+    }
+
+    drawPortals();
+    drawMeteors();
+    drawShockwaves();
+    drawBoss();
+    drawBeams();
+
+    if (ally && !ally.dead) drawShip(ally, ally.aim);
+    if (me && !me.dead) {
+      const myAim = currentRole === 'client' ? Math.atan2(mouse.y - me.y, mouse.x - me.x) : me.aim;
+      drawShip(me, myAim);
+    }
+
+    drawMinimap();
+  }
+
+  const ROOM_COLORS = {
+    [ROOM_START]: '#7cfc9a',
+    [ROOM_NORMAL]: '#9fdcff',
+    [ROOM_BONUS]: '#ffd23c',
+    [ROOM_BOSS]: '#ff4d4d',
+    [ROOM_MINIBOSS]: '#ff8c3c',
+  };
+
+  function drawPortals() {
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 300);
+
+    for (const portal of portals) {
+      const color = ROOM_COLORS[portal.type] || '#9fdcff';
+      ctx.save();
+      ctx.translate(portal.x, portal.y);
+
+      // Halo exterior que late
+      ctx.globalAlpha = 0.25 + pulse * 0.3;
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 30;
+      ctx.beginPath();
+      ctx.arc(0, 0, portal.r + 8 + pulse * 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Anillo
+      ctx.globalAlpha = 0.95;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, portal.r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Interior oscuro
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = '#0b0d12';
+      ctx.beginPath();
+      ctx.arc(0, 0, portal.r - 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Marca de sala ya visitada
+      if (portal.cleared) {
+        ctx.globalAlpha = 0.6;
+        ctx.strokeStyle = '#5c6478';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-10, 0); ctx.lineTo(10, 0);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    if (galaxyPortal) {
+      ctx.save();
+      ctx.translate(galaxyPortal.x, galaxyPortal.y);
+      ctx.globalAlpha = 0.3 + pulse * 0.4;
+      ctx.fillStyle = '#c9a6ff';
+      ctx.shadowColor = '#c9a6ff';
+      ctx.shadowBlur = 60;
+      ctx.beginPath();
+      ctx.arc(0, 0, galaxyPortal.r + 14 + pulse * 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#e6d4ff';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(0, 0, galaxyPortal.r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = '#12081f';
+      ctx.beginPath();
+      ctx.arc(0, 0, galaxyPortal.r - 7, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Espiral de estrellas dentro del portal
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 22; i++) {
+        const a = (i / 22) * Math.PI * 6 + performance.now() / 900;
+        const rad = (i / 22) * (galaxyPortal.r - 12);
+        ctx.beginPath();
+        ctx.arc(Math.cos(a) * rad, Math.sin(a) * rad, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.font = 'bold 17px Segoe UI, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#e6d4ff';
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur = 6;
+      ctx.fillText('SIGUIENTE GALAXIA', 0, galaxyPortal.r + 32);
+      ctx.restore();
+    }
+  }
+
+  // Minimapa estilo Isaac, arriba a la izquierda.
+  function drawMinimap() {
+    if (!roomGrid.length) return;
+
+    const cell = 17, gap = 3, pad = 8;
+    const w = GRID * (cell + gap) - gap;
+    const ox = 18, oy = 58;
+
+    ctx.save();
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = '#0b0d12';
+    ctx.strokeStyle = '#3d4560';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.rect(ox - pad, oy - pad, w + pad * 2, w + pad * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const room = roomGrid[gy] && roomGrid[gy][gx];
+        if (!room) continue;
+
+        const x = ox + gx * (cell + gap);
+        const y = oy + gy * (cell + gap);
+        const isCurrent = currentRoom && room.gx === currentRoom.gx && room.gy === currentRoom.gy;
+
+        // Sin visitar se ve apagada; el jefe siempre se intuye.
+        let color = ROOM_COLORS[room.type] || '#9fdcff';
+        let alpha = room.visited ? 1 : 0.28;
+        if (!room.visited && room.type === ROOM_BOSS) alpha = 0.5;
+
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = room.visited && room.cleared ? '#2a3346' : color;
+        ctx.fillRect(x, y, cell, cell);
+
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = isCurrent ? 2.5 : 1;
+        ctx.strokeRect(x, y, cell, cell);
+
+        if (isCurrent) {
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(x + cell / 2, y + cell / 2, 3.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawMeteors() {
+    for (const m of meteors) {
+      // Normalizado contra su propio aviso maximo: el grande y el pequeno
+      // avisan tiempos distintos, asi los dos terminan el barrido a la vez.
+      const t = clamp(1 - m.warn / (m.maxWarn || 1), 0, 1); // 0 recien marcado, 1 a punto de caer
+      ctx.save();
+
+      // Zona de peligro
+      ctx.globalAlpha = 0.18 + t * 0.3;
+      ctx.fillStyle = m.color;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Borde que parpadea mas rapido cuanto menos queda
+      ctx.globalAlpha = 0.5 + t * 0.5;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2 + t * 3;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Circulo interior que se cierra marcando el tiempo restante
+      ctx.globalAlpha = 0.75;
+      ctx.strokeStyle = m.color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.radius * (1 - t), 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  function drawShockwaves() {
+    for (const s of shockwaves) {
+      const t = clamp(s.life / s.maxLife, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = t * 0.8;
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = 3 + t * 5;
+      ctx.shadowColor = s.color;
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      // El radio llega tambien por la red, asi que se protege el dibujado:
+      // un valor negativo tira una excepcion y se lleva el bucle por delante.
+      ctx.arc(s.x, s.y, Math.max(0, s.r), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawBeams() {
+    for (const beam of beams) {
+      const t = clamp(beam.life / beam.maxLife, 0, 1);
+      // Se ensancha al salir y se estrecha al terminar.
+      const grow = clamp((beam.maxLife - beam.life) / 0.15, 0, 1);
+      const width = beam.width * grow * (0.6 + t * 0.4);
+      const len = 2000;
+
+      ctx.save();
+      ctx.translate(beam.x, beam.y);
+      ctx.rotate(beam.angle);
+
+      // Halo exterior
+      ctx.globalAlpha = 0.35 * t;
+      ctx.fillStyle = beam.color;
+      ctx.shadowColor = beam.color;
+      ctx.shadowBlur = 40;
+      ctx.fillRect(0, -width, len, width * 2);
+
+      // Nucleo brillante
+      ctx.globalAlpha = 0.95 * t;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, -width * 0.32, len, width * 0.64);
+
+      ctx.restore();
+    }
+  }
+
+  function drawBoss() {
+    if (!boss) return;
+
+    // Aviso previo: anillo rojo que se cierra sobre el jefe.
+    if (boss.telegraph > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.25 + boss.telegraph * 0.5;
+      ctx.strokeStyle = '#ff3b3b';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([12, 10]);
+      ctx.beginPath();
+      ctx.arc(boss.x, boss.y, boss.r + 60 * (1 - boss.telegraph) + 14, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Orbes del laser siendo absorbidos.
+    if (boss.laser && !boss.laser.firing) {
+      for (const orb of boss.laser.orbs) {
+        const ox = boss.x + Math.cos(orb.angle) * orb.dist;
+        const oy = boss.y + Math.sin(orb.angle) * orb.dist;
+        ctx.save();
+        ctx.fillStyle = boss.accent;
+        ctx.shadowColor = boss.accent;
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.arc(ox, oy, orb.r, 0, Math.PI * 2);
+        ctx.fill();
+        // Hilo que conecta el orbe con el nucleo
+        ctx.globalAlpha = 0.25;
+        ctx.strokeStyle = boss.accent;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(ox, oy);
+        ctx.lineTo(boss.x, boss.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // Cuerpo del jefe: nucleo + anillos girando.
+    ctx.save();
+    ctx.translate(boss.x, boss.y);
+
+    ctx.rotate(boss.spin);
+    ctx.strokeStyle = boss.accent;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 4;
+    ctx.setLineDash([18, 14]);
+    ctx.beginPath();
+    ctx.arc(0, 0, boss.r + 16, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.rotate(-boss.spin * 2.1);
+    ctx.setLineDash([10, 18]);
+    ctx.beginPath();
+    ctx.arc(0, 0, boss.r + 30, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(boss.x, boss.y);
+
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = boss.color;
+    ctx.shadowColor = boss.color;
+    ctx.shadowBlur = 34;
+    ctx.beginPath();
+    ctx.arc(0, 0, boss.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nucleo interior claro, mas intenso en fase 2.
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = boss.phase === 2 ? '#ffffff' : boss.accent;
+    ctx.beginPath();
+    ctx.arc(0, 0, boss.r * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nucleo del laser cargandose encima del jefe.
+    if (boss.laser && !boss.laser.firing) {
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = boss.accent;
+      ctx.shadowBlur = 45;
+      ctx.beginPath();
+      ctx.arc(0, 0, boss.laser.core, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  // ---------- loop ----------
+  function loop(ts) {
+    if (!running) return;
+    // El reloj de requestAnimationFrame marca el principio del fotograma, que
+    // puede ser ANTERIOR al performance.now() que se guarda al reanudar tras
+    // elegir una mejora. Sin el tope de abajo, ese primer dt salia negativo y
+    // el tiempo corria hacia atras: las ondas expansivas crecian al reves
+    // hasta tener radio negativo y el juego se caia al dibujarlas.
+    const dt = clamp((ts - lastTime) / 1000 || 0, 0, 0.033);
+    lastTime = ts;
+    // Si algo falla, antes el juego se congelaba sin decir nada porque la
+    // excepcion cortaba el requestAnimationFrame. Ahora se muestra el error.
+    try {
+      if (currentRole === 'client') clientTick(dt);
+      else if (currentRole === 'spectator') spectatorTick(dt);
+      else hostTick(dt);
+      draw();
+    } catch (err) {
+      showCrash(err);
+      return;
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // Muestra el fallo en pantalla en lugar de dejar el juego congelado.
+  // Asi se puede copiar el error y saber que ha pasado.
+  function showCrash(err) {
+    running = false;
+    console.error('[Click Shooter] Fallo en el bucle:', err);
+    bossBar.classList.add('hidden');
+    gameoverSub.innerHTML =
+      'El juego ha fallado. Copia esto y pasaselo a quien lo programo:<br>'
+      + '<span style="font-size:12px;color:#ff9a9a;word-break:break-all;">'
+      + String(err && err.stack ? err.stack : err).slice(0, 400)
+      + '</span>';
+    menuPanel.classList.add('hidden');
+    gameoverPanel.classList.remove('hidden');
+    overlay.classList.remove('hidden');
+  }
+
+  function showGameOver() {
+    running = false;
+    Sound.gameOver();
+    bossBar.classList.add('hidden');
+    gameoverSub.textContent = `Puntos: ${score} - galaxia ${galaxy}, ${roomsCleared} salas superadas`;
+    menuPanel.classList.add('hidden');
+    gameoverPanel.classList.remove('hidden');
+    overlay.classList.remove('hidden');
+  }
+
+  function startGame(role, meInfo, allyInf) {
+    resetGame(role, meInfo, allyInf);
+    overlay.classList.add('hidden');
+    running = true;
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- lobby / networking wiring ----------
+  document.getElementById('solo-btn').addEventListener('click', () => {
+    saveIdentity();
+    startGame('solo', { name: effectiveName(), skin: mySkin, projectile: myProjectile }, null);
+  });
+
+  document.getElementById('playagain-btn').addEventListener('click', () => location.reload());
+  leaveBtn.addEventListener('click', () => { if (confirm('Leave the current match?')) location.reload(); });
+
+  document.getElementById('host-btn').addEventListener('click', () => {
+    if (typeof Peer === 'undefined') { alert('Multiplayer needs an internet connection (to load the connection library). Check your connection and reload the page.'); return; }
+    saveIdentity();
+    identityPanel.classList.add('hidden');
+    modeButtons.classList.add('hidden');
+    hostPanel.classList.remove('hidden');
+    tryHost(3);
+  });
+
+  function tryHost(attemptsLeft) {
+    hostStatus.textContent = 'Generando código…';
+    const code = randomCode();
+    roomCodeEl.textContent = code;
+    peer = new Peer(code);
+    peer.on('open', id => {
+      roomCodeEl.textContent = id;
+      hostStatus.textContent = 'Esperando a que se una un jugador…';
+      renderPlayerList(hostPlayerList, [{ name: effectiveName(), color: SKIN_MAP[mySkin].color }]);
+      startHostedBtn.classList.remove('hidden');
+    });
+    peer.on('connection', c => {
+      // El primer mensaje que manda dice si quiere jugar o solo mirar; hasta
+      // entonces no se sabe si hay que aplicar el limite de un companero.
+      c.on('open', () => {
+        c.once('data', data => {
+          if (data.t === 'spectate') { addSpectator(c, data); return; }
+          if (data.t !== 'join' || !lobbyOpen || allyInfo) { c.close(); return; }
+          conn = c;
+          allyInfo = { name: data.name, skin: data.skin, projectile: data.projectile };
+          safeSend({ t: 'room', v: GAME_VERSION, host: { name: effectiveName(), skin: mySkin, projectile: myProjectile } });
+          setVersionStatus(hostStatus, data.v, '¡Jugador conectado!');
+          renderPlayerList(hostPlayerList, [
+            { name: effectiveName(), color: SKIN_MAP[mySkin].color },
+            { name: allyInfo.name, color: SKIN_MAP[allyInfo.skin] ? SKIN_MAP[allyInfo.skin].color : '#ffb238' },
+          ]);
+          setupHostDataHandlers();
+        });
+      });
+    });
+    peer.on('error', err => {
+      if (err.type === 'unavailable-id' && attemptsLeft > 0) {
+        peer.destroy();
+        tryHost(attemptsLeft - 1);
+      } else {
+        hostStatus.textContent = 'Could not create a room. Please try again.';
+      }
+    });
+  }
+
+  document.getElementById('cancel-host-btn').addEventListener('click', () => location.reload());
+
+  document.getElementById('join-btn').addEventListener('click', () => {
+    if (typeof Peer === 'undefined') { alert('Multiplayer needs an internet connection (to load the connection library). Check your connection and reload the page.'); return; }
+    saveIdentity();
+    identityPanel.classList.add('hidden');
+    modeButtons.classList.add('hidden');
+    joinPanel.classList.remove('hidden');
+    joinInput.focus();
+  });
+
+  joinInput.addEventListener('input', () => { joinInput.value = joinInput.value.toUpperCase(); });
+
+  document.getElementById('connect-btn').addEventListener('click', () => {
+    const code = joinInput.value.trim().toUpperCase();
+    if (!code) return;
+    joinStatus.textContent = 'Conectando…';
+    peer = new Peer();
+    peer.on('open', () => {
+      conn = peer.connect(code, { reliable: true });
+      conn.on('open', () => {
+        setupClientDataHandlers();
+        safeSend({ t: 'join', v: GAME_VERSION, name: effectiveName(), skin: mySkin, projectile: myProjectile });
+        joinForm.classList.add('hidden');
+        joinPlayerList.classList.remove('hidden');
+        joinWaitText.classList.remove('hidden');
+        joinStatus.textContent = '';
+        renderPlayerList(joinPlayerList, [{ name: effectiveName(), color: SKIN_MAP[mySkin].color }]);
+      });
+      conn.on('error', () => { joinStatus.textContent = 'No se pudo conectar. Verifica el código.'; });
+    });
+    peer.on('error', () => { joinStatus.textContent = 'Conexión fallida. Verifica el código.'; });
+  });
+
+  document.getElementById('cancel-join-btn').addEventListener('click', () => location.reload());
+
+  document.getElementById('spectate-btn').addEventListener('click', () => {
+    if (typeof Peer === 'undefined') { alert('Multiplayer needs an internet connection (to load the connection library). Check your connection and reload the page.'); return; }
+    saveIdentity();
+    identityPanel.classList.add('hidden');
+    modeButtons.classList.add('hidden');
+    spectatePanel.classList.remove('hidden');
+    spectateInput.focus();
+  });
+
+  spectateInput.addEventListener('input', () => { spectateInput.value = spectateInput.value.toUpperCase(); });
+
+  document.getElementById('spectate-connect-btn').addEventListener('click', () => {
+    const code = spectateInput.value.trim().toUpperCase();
+    if (!code) return;
+    spectateStatus.textContent = 'Conectando…';
+    peer = new Peer();
+    peer.on('open', () => {
+      conn = peer.connect(code, { reliable: true });
+      conn.on('open', () => {
+        setupSpectatorDataHandlers();
+        safeSend({ t: 'spectate', v: GAME_VERSION, name: effectiveName() });
+      });
+      conn.on('error', () => { spectateStatus.textContent = 'No se pudo conectar. Verifica el código.'; });
+    });
+    peer.on('error', () => { spectateStatus.textContent = 'Conexión fallida. Verifica el código.'; });
+  });
+
+  document.getElementById('cancel-spectate-btn').addEventListener('click', () => location.reload());
+
+  function setupSpectatorDataHandlers() {
+    conn.on('data', data => {
+      if (data.t === 'spectate-ok') {
+        hostInfo = data.host;
+        setVersionStatus(spectateStatus, data.v, '');
+        startGame('spectator', null, null);
+      } else if (data.t === 'state') {
+        applyState(data);
+      }
+    });
+    conn.on('close', () => { running = false; alert('Se perdió la conexión con la partida.'); });
+  }
+
+  specChatSendBtn.addEventListener('click', sendSpecChat);
+  specChatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendSpecChat(); });
+  function sendSpecChat() {
+    const text = specChatInput.value.trim().slice(0, 140);
+    if (!text) return;
+    safeSend({ t: 'spec-chat', text });
+    specChatInput.value = '';
+  }
+
+  document.querySelectorAll('.spec-spawn-btn').forEach(btn => {
+    btn.addEventListener('click', () => safeSend({ t: 'spec-spawn', enemyType: btn.dataset.type }));
+  });
+
+  // El primer mensaje del companero (el 'join') ya se proceso al aceptar la
+  // conexion, arriba en peer.on('connection', ...); aqui solo llega lo que
+  // manda mientras juega.
+  function setupHostDataHandlers() {
+    conn.on('data', data => {
+      if (data.t === 'input') {
+        remoteInput = { mx: data.mx, my: data.my, aimAngle: data.aim, shooting: data.shooting };
+      } else if (data.t === 'upgrade') {
+        chooseUpgrade('ally', data.index);
+      }
+    });
+    conn.on('close', () => {
+      if (currentRole === 'host') {
+        ally = null;
+        resumeAfterLevelUp();
+      } else {
+        allyInfo = null;
+        conn = null;
+        hostStatus.textContent = 'El jugador se desconectó. Esperando…';
+        renderPlayerList(hostPlayerList, [{ name: effectiveName(), color: SKIN_MAP[mySkin].color }]);
+      }
+    });
+  }
+
+  // Un espectador no ocupa el hueco de companero: puede haber varios a la
+  // vez, y pueden unirse en cualquier momento (con la partida ya empezada).
+  // No entra a escondidas: se avisa a los jugadores con queueSpecEvent().
+  function addSpectator(c, data) {
+    const name = (String(data.name || '').trim() || 'Espectador').slice(0, 14);
+    spectators.push({ conn: c, name });
+    safeSend({ t: 'spectate-ok', v: GAME_VERSION, host: { name: effectiveName(), skin: mySkin, projectile: myProjectile } }, c);
+    queueSpecEvent(name + ' se ha unido a mirar.');
+
+    c.on('data', d => {
+      if (d.t === 'spec-chat') {
+        const text = String(d.text || '').trim().slice(0, 140);
+        if (text) queueSpecChat(name, text);
+      } else if (d.t === 'spec-spawn') {
+        // Solo mientras hay partida de verdad en marcha, y solo tipos de la
+        // lista blanca: un mensaje con basura no debe poder tirar el juego.
+        if (running && currentRole === 'host' && SPEC_SPAWNABLE.includes(d.enemyType)) {
+          spawnEnemy(d.enemyType);
+        }
+      }
+    });
+    c.on('close', () => {
+      spectators = spectators.filter(s => s.conn !== c);
+      queueSpecEvent(name + ' se fue.');
+    });
+  }
+
+  startHostedBtn.addEventListener('click', () => {
+    lobbyOpen = false;
+    const meInfo = { name: effectiveName(), skin: mySkin, projectile: myProjectile };
+    safeSend({ t: 'start', host: meInfo });
+    startGame('host', meInfo, allyInfo);
+  });
+
+  function setupClientDataHandlers() {
+    conn.on('data', data => {
+      if (data.t === 'room') {
+        hostInfo = data.host;
+        setVersionStatus(joinStatus, data.v, '');
+        renderPlayerList(joinPlayerList, [
+          { name: hostInfo.name, color: SKIN_MAP[hostInfo.skin] ? SKIN_MAP[hostInfo.skin].color : '#3d5afe' },
+          { name: effectiveName(), color: SKIN_MAP[mySkin].color },
+        ]);
+      } else if (data.t === 'start') {
+        hostInfo = data.host || hostInfo;
+        startGame('client', { name: effectiveName(), skin: mySkin, projectile: myProjectile }, hostInfo);
+      } else if (data.t === 'state') {
+        applyState(data);
+      }
+    });
+    conn.on('close', () => { running = false; alert('Se perdió la conexión con el host.'); });
+  }
+})();
+
+// Registro del service worker, fuera del IIFE del juego (no le hace falta
+// nada de ese estado). Si falla (por ejemplo, abierto por file:// o por una
+// IP sin https), el juego sigue funcionando igual: solo se pierde la opcion
+// de instalarlo como app.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
