@@ -54,7 +54,7 @@
   }
   #hud .stat { margin-right: 24px; }
   #bars { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-  #healthbar-outer, #xpbar-outer, #ally-bar-outer {
+  #healthbar-outer, #xpbar-outer, #ally-bar-outer, #ally2-bar-outer {
     width: 200px;
     height: 16px;
     border: 2px solid #4a5468;
@@ -62,7 +62,7 @@
     overflow: hidden;
     background: #1a1f2b;
   }
-  #xpbar-outer, #ally-bar-outer { height: 10px; }
+  #xpbar-outer, #ally-bar-outer, #ally2-bar-outer { height: 10px; }
   #healthbar-inner {
     height: 100%;
     width: 100%;
@@ -79,6 +79,12 @@
     height: 100%;
     width: 100%;
     background: linear-gradient(90deg, #ffb238, #ffd23c);
+    transition: width 0.15s ease-out;
+  }
+  #ally2-bar-inner {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #a06bff, #4dd0ff);
     transition: width 0.15s ease-out;
   }
   #leave-btn {
@@ -503,6 +509,7 @@
         <div id="healthbar-outer"><div id="healthbar-inner"></div></div>
         <div id="xpbar-outer"><div id="xpbar-inner"></div></div>
         <div id="ally-bar-outer" style="display:none;"><div id="ally-bar-inner"></div></div>
+        <div id="ally2-bar-outer" style="display:none;"><div id="ally2-bar-inner"></div></div>
       </div>
       <button id="leave-btn">Leave</button>
       <div id="mute-indicator">🔊 Sonido (M)</div>
@@ -652,6 +659,8 @@
   const xpInner = document.getElementById('xpbar-inner');
   const allyBarOuter = document.getElementById('ally-bar-outer');
   const allyBarInner = document.getElementById('ally-bar-inner');
+  const ally2BarOuter = document.getElementById('ally2-bar-outer');
+  const ally2BarInner = document.getElementById('ally2-bar-inner');
   const levelupOverlay = document.getElementById('levelup-overlay');
   const levelupChoices = document.getElementById('levelup-choices');
   const levelupStatus = document.getElementById('levelup-status');
@@ -1268,7 +1277,7 @@
   // codigo no sabe leer y salen fallos raros (portales que no se ven, barras
   // vacias...) sin ningun error en pantalla. Se avisa en el lobby.
   // Subir este numero al cambiar lo que viaja en buildSnapshot().
-  const GAME_VERSION = 'salas-4';
+  const GAME_VERSION = 'salas-5';
 
   function sameVersion(theirs) {
     return theirs === GAME_VERSION;
@@ -1289,9 +1298,10 @@
   }
 
   // ---------- networking state ----------
-  let currentRole = 'solo'; // 'solo' | 'host' | 'client' | 'spectator'
-  let peer = null, conn = null, lobbyOpen = true;
-  let allyInfo = null; // host: info about the connected client
+  let currentRole = 'solo'; // 'solo' | 'host' | 'client' | 'client2' | 'spectator'
+  let peer = null, conn = null, conn2 = null, lobbyOpen = true;
+  let allyInfo = null; // host: info sobre el primer companero conectado
+  let allyInfo2 = null; // host: info sobre el segundo companero (hasta 3 en total)
   let hostInfo = null; // client/spectator: info about the host
   // Quien mira sin jugar: el anfitrion puede tener varios a la vez, a
   // diferencia del companero (uno como mucho). Cada entrada es
@@ -1322,6 +1332,7 @@
   }
 
   let remoteInput = { mx: 0, my: 0, aimAngle: 0, shooting: false };
+  let remoteInput2 = { mx: 0, my: 0, aimAngle: 0, shooting: false };
   let netSendTimer = 0;
   let lastShownLevelUpId = 0;
   let myUpgradeSent = false;
@@ -1329,7 +1340,7 @@
 
   // ---------- game state ----------
   let running = false;
-  let me, ally, bullets, enemies, particles, pickups, score, spawnQueue, gameOverFlag;
+  let me, ally, ally2, bullets, enemies, particles, pickups, score, spawnQueue, gameOverFlag;
   let level; // numero de mejoras elegidas
   let levelUpState = null, levelUpCounter = 0, levelUpDeadlockTimer = null;
   let lastTime = 0;
@@ -1493,7 +1504,7 @@
   // Cuantos jugadores hay ahora mismo. Solo lo llama el anfitrion (el unico
   // que genera enemigos), asi que "ally" siempre esta al dia.
   function playerCount() {
-    return ally ? 2 : 1;
+    return 1 + (ally ? 1 : 0) + (ally2 ? 1 : 0);
   }
 
   // El daño del grupo sube con cada jugador (cada uno dispara a su potencia
@@ -1540,8 +1551,15 @@
       ? { x: LOGICAL_W / 2 - fromDir.dx * (LOGICAL_W / 2 - 150), y: LOGICAL_H / 2 - fromDir.dy * (LOGICAL_H / 2 - 130) }
       : { x: LOGICAL_W / 2, y: LOGICAL_H / 2 };
 
-    if (me) { me.x = entry.x - (ally ? 34 : 0); me.y = entry.y; }
-    if (ally) { ally.x = entry.x + 34; ally.y = entry.y; }
+    // Con 3 se reparten en fila; con 1 o 2 se queda el reparto de siempre.
+    if (ally2) {
+      if (me) { me.x = entry.x - 60; me.y = entry.y; }
+      if (ally) { ally.x = entry.x; ally.y = entry.y; }
+      ally2.x = entry.x + 60; ally2.y = entry.y;
+    } else {
+      if (me) { me.x = entry.x - (ally ? 34 : 0); me.y = entry.y; }
+      if (ally) { ally.x = entry.x + 34; ally.y = entry.y; }
+    }
 
     if (room.cleared || room.type === ROOM_START) {
       room.cleared = true;
@@ -1608,7 +1626,7 @@
     // Segunda oportunidad: si alguien cayo pero el grupo aguanto hasta
     // llegar aqui (jefe derrotado), revive con media vida al entrar en el
     // piso nuevo. No revive a mitad de sala, solo al cruzar de galaxia.
-    const revividos = [me, ally].filter(p => p && p.dead);
+    const revividos = [me, ally, ally2].filter(p => p && p.dead);
     for (const p of revividos) {
       p.dead = false;
       p.hp = Math.round(p.maxHp * 0.5);
@@ -1656,20 +1674,23 @@
     };
   }
 
-  function resetGame(role, meInfo, allyInf) {
+  function resetGame(role, meInfo, allyInf, allyInf2) {
     currentRole = role;
     spectatorPanel.classList.toggle('hidden', role !== 'spectator');
     if (role === 'host' && allyInf) {
-      me = makePlayer(LOGICAL_W / 2 - 40, LOGICAL_H / 2, meInfo);
-      ally = makePlayer(LOGICAL_W / 2 + 40, LOGICAL_H / 2, allyInf);
+      me = makePlayer(LOGICAL_W / 2 - (allyInf2 ? 60 : 40), LOGICAL_H / 2, meInfo);
+      ally = makePlayer(LOGICAL_W / 2 + (allyInf2 ? 0 : 40), LOGICAL_H / 2, allyInf);
+      ally2 = allyInf2 ? makePlayer(LOGICAL_W / 2 + 60, LOGICAL_H / 2, allyInf2) : null;
     } else if (role === 'spectator') {
-      // No hay nave propia que mover: las dos que se ven llegan del
+      // No hay nave propia que mover: las que se ven llegan del
       // anfitrion en cada foto del estado (ver applyState).
       me = null;
       ally = null;
+      ally2 = null;
     } else {
       me = makePlayer(LOGICAL_W / 2, LOGICAL_H / 2, meInfo);
       ally = null;
+      ally2 = null;
     }
     bullets = [];
     enemies = [];
@@ -1685,6 +1706,7 @@
     level = 0;
     levelUpState = null;
     remoteInput = { mx: 0, my: 0, aimAngle: 0, shooting: false };
+    remoteInput2 = { mx: 0, my: 0, aimAngle: 0, shooting: false };
     netSendTimer = 0;
     clientGameOverShown = false;
 
@@ -1724,6 +1746,12 @@
     } else {
       allyBarOuter.style.display = 'none';
     }
+    if (ally2) {
+      ally2BarOuter.style.display = 'block';
+      ally2BarInner.style.width = (clamp(ally2.hp / ally2.maxHp, 0, 1) * 100) + '%';
+    } else {
+      ally2BarOuter.style.display = 'none';
+    }
   }
 
   function countRooms() {
@@ -1750,19 +1778,21 @@
       choices: pool.map(c => ({ name: c.name, desc: c.desc, rarity: c.rarity })),
       readyMe: false,
       readyAlly: !ally,
+      readyAlly2: !ally2,
     };
     showLevelUpUI(levelUpState.choices, idx => chooseUpgrade('me', idx));
     if (currentRole === 'host') broadcastSnapshot();
 
-    // Seguro anti-bloqueo: si la eleccion del companero nunca llega (mensaje
-    // perdido, desconexion silenciosa...), la partida continua sola en vez de
-    // quedarse congelada para siempre.
+    // Seguro anti-bloqueo: si la eleccion de algun companero nunca llega
+    // (mensaje perdido, desconexion silenciosa...), la partida continua sola
+    // en vez de quedarse congelada para siempre.
     clearTimeout(levelUpDeadlockTimer);
-    if (ally) {
+    if (ally || ally2) {
       levelUpDeadlockTimer = setTimeout(() => {
         if (!levelUpState) return;
-        console.warn('[Nivel] La eleccion del companero no llego; continuo la partida.');
+        console.warn('[Nivel] La eleccion de algun companero no llego; continuo la partida.');
         levelUpState.readyAlly = true;
+        levelUpState.readyAlly2 = true;
         levelUpState.readyMe = true;
         resumeAfterLevelUp();
       }, 25000);
@@ -1772,10 +1802,12 @@
   function chooseUpgrade(who, index) {
     if (!levelUpState) return;
     const choice = levelUpState.pool[index];
-    const target = who === 'me' ? me : ally;
+    const target = who === 'me' ? me : who === 'ally2' ? ally2 : ally;
     if (choice && target) choice.apply(target);
-    if (who === 'me') levelUpState.readyMe = true; else levelUpState.readyAlly = true;
-    if (levelUpState.readyMe && levelUpState.readyAlly) {
+    if (who === 'me') levelUpState.readyMe = true;
+    else if (who === 'ally2') levelUpState.readyAlly2 = true;
+    else levelUpState.readyAlly = true;
+    if (levelUpState.readyMe && levelUpState.readyAlly && levelUpState.readyAlly2) {
       resumeAfterLevelUp();
     } else if (currentRole === 'host') {
       broadcastSnapshot();
@@ -1785,14 +1817,15 @@
   function resumeAfterLevelUp() {
     if (!levelUpState) return;
     if (!ally) levelUpState.readyAlly = true;
-    if (!(levelUpState.readyMe && levelUpState.readyAlly)) return;
+    if (!ally2) levelUpState.readyAlly2 = true;
+    if (!(levelUpState.readyMe && levelUpState.readyAlly && levelUpState.readyAlly2)) return;
 
     clearTimeout(levelUpDeadlockTimer);
     levelUpState = null;
 
     // Las salas bonus dan dos mejoras: si queda otra, se vuelve a mostrar la
     // pantalla en vez de reanudar la partida.
-    if (currentRole !== 'client' && !afterUpgradeChosen()) return;
+    if (currentRole !== 'client' && currentRole !== 'client2' && !afterUpgradeChosen()) return;
 
     levelupOverlay.classList.add('hidden');
     running = true;
@@ -2647,11 +2680,14 @@
   // ---------- host/solo simulation ----------
   function hostTick(dt) {
     if (gameOverFlag) return;
-    const activePlayers = ally ? [me, ally] : [me];
+    const activePlayers = [me];
+    if (ally) activePlayers.push(ally);
+    if (ally2) activePlayers.push(ally2);
 
     const meInput = localInput();
     if (!me.dead) { movePlayer(me, meInput, dt); tryShoot(me, meInput, dt); }
     if (ally && !ally.dead) { movePlayer(ally, remoteInput, dt); tryShoot(ally, remoteInput, dt); }
+    if (ally2 && !ally2.dead) { movePlayer(ally2, remoteInput2, dt); tryShoot(ally2, remoteInput2, dt); }
 
     // bullets
     for (let i = bullets.length - 1; i >= 0; i--) {
@@ -2860,6 +2896,7 @@
       // propio movimiento sin esperar al host.
       me: { x: r1(me.x), y: r1(me.y), hp: r1(me.hp), maxHp: me.maxHp, aim: r2(me.aim), dead: me.dead, name: me.name, color: me.color, speed: r1(me.speed), r: me.r },
       ally: ally ? { x: r1(ally.x), y: r1(ally.y), hp: r1(ally.hp), maxHp: ally.maxHp, aim: r2(ally.aim), dead: ally.dead, name: ally.name, color: ally.color, speed: r1(ally.speed), r: ally.r } : null,
+      ally2: ally2 ? { x: r1(ally2.x), y: r1(ally2.y), hp: r1(ally2.hp), maxHp: ally2.maxHp, aim: r2(ally2.aim), dead: ally2.dead, name: ally2.name, color: ally2.color, speed: r1(ally2.speed), r: ally2.r } : null,
       // Arrays planos de numeros en vez de objetos: un objeto repite el nombre
       // de cada campo por cada elemento ("x","y","r","friendly","style"...),
       // lo que con cientos de balas multiplica el tamano del paquete.
@@ -2911,7 +2948,7 @@
       gp: galaxyPortal ? [r1(galaxyPortal.x), r1(galaxyPortal.y), galaxyPortal.r] : null,
       score, level, galaxy, roomsCleared,
       gameOver: gameOverFlag,
-      levelUp: levelUpState ? { id: levelUpState.id, choices: levelUpState.choices, readyMe: levelUpState.readyMe, readyAlly: levelUpState.readyAlly } : null,
+      levelUp: levelUpState ? { id: levelUpState.id, choices: levelUpState.choices, readyMe: levelUpState.readyMe, readyAlly: levelUpState.readyAlly, readyAlly2: levelUpState.readyAlly2 } : null,
       // Sonidos que ha disparado la simulacion desde el paquete anterior.
       sfx: sfxQueue,
       // Avisos de espectador (union/salida) y mensajes de chat pendientes.
@@ -2924,12 +2961,13 @@
     return paquete;
   }
 
-  // Una sola foto para el companero Y para todos los espectadores: si se
+  // Una sola foto para los companeros Y para todos los espectadores: si se
   // llamara a buildSnapshot() por separado para cada uno, la segunda vez ya
   // habria vaciado las colas de sonido/chat y la primera se las quedaria todas.
   function broadcastSnapshot() {
     const snap = buildSnapshot();
-    safeSend(snap);
+    safeSend(snap, conn);
+    if (conn2) safeSend(snap, conn2);
     if (spectators.length) broadcastToSpectators(snap);
   }
 
@@ -2968,6 +3006,10 @@
       ally.x += (ally.tx - ally.x) * smooth;
       ally.y += (ally.ty - ally.y) * smooth;
     }
+    if (ally2 && ally2.tx !== undefined) {
+      ally2.x += (ally2.tx - ally2.x) * smooth;
+      ally2.y += (ally2.ty - ally2.y) * smooth;
+    }
     if (boss && boss.tx !== undefined) {
       boss.x += (boss.tx - boss.x) * smooth;
       boss.y += (boss.ty - boss.y) * smooth;
@@ -2975,8 +3017,8 @@
     }
   }
 
-  // No hay nave que mover ni entrada que mandar: las dos naves que se ven
-  // (la del anfitrion y la de su companero, si lo tiene) se tratan igual,
+  // No hay nave que mover ni entrada que mandar: las naves que se ven
+  // (la del anfitrion y las de sus companeros, si los tiene) se tratan igual,
   // deslizandose hacia su posicion real, sin prediccion propia.
   function spectatorTick(dt) {
     if (gameOverFlag) return;
@@ -3000,6 +3042,10 @@
       ally.x += (ally.tx - ally.x) * smooth;
       ally.y += (ally.ty - ally.y) * smooth;
     }
+    if (ally2 && ally2.tx !== undefined) {
+      ally2.x += (ally2.tx - ally2.x) * smooth;
+      ally2.y += (ally2.ty - ally2.y) * smooth;
+    }
     if (boss && boss.tx !== undefined) {
       boss.x += (boss.tx - boss.x) * smooth;
       boss.y += (boss.ty - boss.y) * smooth;
@@ -3013,7 +3059,9 @@
     // muerte...). Si es pequena se desliza, para que no de tirones. El
     // espectador no predice nada propio (no controla ninguna nave), asi que
     // esta se trata igual que la del companero: solo se desliza.
-    const hostMe = s.ally; // desde el host, yo soy su "ally"
+    // Desde el host, yo soy su "ally" (companero 1) o su "ally2" (companero
+    // 2), segun el hueco que me toco al unirme.
+    const hostMe = currentRole === 'client2' ? s.ally2 : s.ally;
     if (currentRole === 'spectator') {
       if (hostMe) {
         if (!me) me = { ...hostMe };
@@ -3053,6 +3101,22 @@
       ally.ty = s.me.y;
     } else {
       ally = null;
+    }
+
+    // ---- Segundo companero: el otro jugador real que no soy yo. Si soy
+    // client2, ese "otro" es el companero 1 (llega en s.ally, no en
+    // s.ally2, que ahi soy yo mismo). Para el resto de roles llega tal cual
+    // en s.ally2.
+    {
+      const otherSource = currentRole === 'client2' ? s.ally : s.ally2;
+      if (otherSource) {
+        if (!ally2) ally2 = { ...otherSource };
+        else Object.assign(ally2, otherSource, { x: ally2.x, y: ally2.y });
+        ally2.tx = otherSource.x;
+        ally2.ty = otherSource.y;
+      } else {
+        ally2 = null;
+      }
     }
 
     // ---- Enemigos: se reutilizan por id para poder interpolarlos ----
@@ -3361,8 +3425,9 @@
     drawBeams();
 
     if (ally && !ally.dead) drawShip(ally, ally.aim);
+    if (ally2 && !ally2.dead) drawShip(ally2, ally2.aim);
     if (me && !me.dead) {
-      const myAim = currentRole === 'client' ? Math.atan2(mouse.y - me.y, mouse.x - me.x) : me.aim;
+      const myAim = (currentRole === 'client' || currentRole === 'client2') ? Math.atan2(mouse.y - me.y, mouse.x - me.x) : me.aim;
       drawShip(me, myAim);
     }
 
@@ -3704,7 +3769,7 @@
     // Si algo falla, antes el juego se congelaba sin decir nada porque la
     // excepcion cortaba el requestAnimationFrame. Ahora se muestra el error.
     try {
-      if (currentRole === 'client') clientTick(dt);
+      if (currentRole === 'client' || currentRole === 'client2') clientTick(dt);
       else if (currentRole === 'spectator') spectatorTick(dt);
       else hostTick(dt);
       draw();
@@ -3741,8 +3806,8 @@
     overlay.classList.remove('hidden');
   }
 
-  function startGame(role, meInfo, allyInf) {
-    resetGame(role, meInfo, allyInf);
+  function startGame(role, meInfo, allyInf, allyInf2) {
+    resetGame(role, meInfo, allyInf, allyInf2);
     overlay.classList.add('hidden');
     running = true;
     lastTime = performance.now();
@@ -3767,6 +3832,19 @@
     tryHost(3);
   });
 
+  // Recalcula la lista de jugadores del lobby y se la manda a todo el mundo
+  // (al anfitrion, pintandola, y a cada companero conectado), para que nadie
+  // se quede con una lista vieja cuando se une o se va alguien.
+  function broadcastRoster() {
+    const rows = [{ name: effectiveName(), color: SKIN_MAP[mySkin].color }];
+    if (allyInfo) rows.push({ name: allyInfo.name, color: SKIN_MAP[allyInfo.skin] ? SKIN_MAP[allyInfo.skin].color : '#ffb238' });
+    if (allyInfo2) rows.push({ name: allyInfo2.name, color: SKIN_MAP[allyInfo2.skin] ? SKIN_MAP[allyInfo2.skin].color : '#a06bff' });
+    renderPlayerList(hostPlayerList, rows);
+    const payload = { t: 'roster', players: rows };
+    if (conn) safeSend(payload, conn);
+    if (conn2) safeSend(payload, conn2);
+  }
+
   function tryHost(attemptsLeft) {
     hostStatus.textContent = 'Generando código…';
     const code = randomCode();
@@ -3780,20 +3858,31 @@
     });
     peer.on('connection', c => {
       // El primer mensaje que manda dice si quiere jugar o solo mirar; hasta
-      // entonces no se sabe si hay que aplicar el limite de un companero.
+      // entonces no se sabe si hay que aplicar el limite de companeros (2
+      // como mucho: 3 jugadores en total contando al anfitrion).
       c.on('open', () => {
         c.once('data', data => {
           if (data.t === 'spectate') { addSpectator(c, data); return; }
-          if (data.t !== 'join' || !lobbyOpen || allyInfo) { c.close(); return; }
-          conn = c;
-          allyInfo = { name: data.name, skin: data.skin, projectile: data.projectile };
-          safeSend({ t: 'room', v: GAME_VERSION, host: { name: effectiveName(), skin: mySkin, projectile: myProjectile } });
-          setVersionStatus(hostStatus, data.v, '¡Jugador conectado!');
-          renderPlayerList(hostPlayerList, [
-            { name: effectiveName(), color: SKIN_MAP[mySkin].color },
-            { name: allyInfo.name, color: SKIN_MAP[allyInfo.skin] ? SKIN_MAP[allyInfo.skin].color : '#ffb238' },
-          ]);
-          setupHostDataHandlers();
+          if (data.t !== 'join' || !lobbyOpen) { c.close(); return; }
+          const hostInfoMsg = { name: effectiveName(), skin: mySkin, projectile: myProjectile };
+          if (!allyInfo) {
+            conn = c;
+            allyInfo = { name: data.name, skin: data.skin, projectile: data.projectile };
+            safeSend({ t: 'room', v: GAME_VERSION, slot: 1, host: hostInfoMsg }, c);
+            setVersionStatus(hostStatus, data.v, '¡Jugador conectado!');
+            broadcastRoster();
+            setupHostDataHandlers(c, 1);
+          } else if (!allyInfo2) {
+            conn2 = c;
+            allyInfo2 = { name: data.name, skin: data.skin, projectile: data.projectile };
+            safeSend({ t: 'room', v: GAME_VERSION, slot: 2, host: hostInfoMsg }, c);
+            setVersionStatus(hostStatus, data.v, '¡Segundo jugador conectado!');
+            broadcastRoster();
+            setupHostDataHandlers(c, 2);
+          } else {
+            // Sala llena: 3 jugadores como mucho.
+            c.close();
+          }
         });
       });
     });
@@ -3898,26 +3987,29 @@
     btn.addEventListener('click', () => safeSend({ t: 'spec-spawn', enemyType: btn.dataset.type }));
   });
 
-  // El primer mensaje del companero (el 'join') ya se proceso al aceptar la
-  // conexion, arriba en peer.on('connection', ...); aqui solo llega lo que
-  // manda mientras juega.
-  function setupHostDataHandlers() {
-    conn.on('data', data => {
+  // El primer mensaje de cada companero (el 'join') ya se proceso al
+  // aceptar la conexion, arriba en peer.on('connection', ...); aqui solo
+  // llega lo que manda mientras juega. slot dice si es el companero 1 o el
+  // 2, para saber a que variables (ally/ally2, remoteInput/remoteInput2...)
+  // afecta cada mensaje.
+  function setupHostDataHandlers(c, slot) {
+    c.on('data', data => {
       if (data.t === 'input') {
-        remoteInput = { mx: data.mx, my: data.my, aimAngle: data.aim, shooting: data.shooting };
+        const input = { mx: data.mx, my: data.my, aimAngle: data.aim, shooting: data.shooting };
+        if (slot === 1) remoteInput = input; else remoteInput2 = input;
       } else if (data.t === 'upgrade') {
-        chooseUpgrade('ally', data.index);
+        chooseUpgrade(slot === 1 ? 'ally' : 'ally2', data.index);
       }
     });
-    conn.on('close', () => {
+    c.on('close', () => {
       if (currentRole === 'host') {
-        ally = null;
+        if (slot === 1) ally = null; else ally2 = null;
         resumeAfterLevelUp();
       } else {
-        allyInfo = null;
-        conn = null;
-        hostStatus.textContent = 'El jugador se desconectó. Esperando…';
-        renderPlayerList(hostPlayerList, [{ name: effectiveName(), color: SKIN_MAP[mySkin].color }]);
+        if (slot === 1) { allyInfo = null; conn = null; }
+        else { allyInfo2 = null; conn2 = null; }
+        hostStatus.textContent = 'Un jugador se desconectó. Esperando…';
+        broadcastRoster();
       }
     });
   }
@@ -3952,22 +4044,31 @@
   startHostedBtn.addEventListener('click', () => {
     lobbyOpen = false;
     const meInfo = { name: effectiveName(), skin: mySkin, projectile: myProjectile };
-    safeSend({ t: 'start', host: meInfo });
-    startGame('host', meInfo, allyInfo);
+    safeSend({ t: 'start', host: meInfo }, conn);
+    if (conn2) safeSend({ t: 'start', host: meInfo }, conn2);
+    startGame('host', meInfo, allyInfo, allyInfo2);
   });
 
   function setupClientDataHandlers() {
+    // Que hueco me toco (1 o 2) llega en el mensaje 'room'; decide si al
+    // empezar la partida soy 'client' o 'client2'.
+    let myClientSlot = 1;
     conn.on('data', data => {
       if (data.t === 'room') {
         hostInfo = data.host;
+        myClientSlot = data.slot || 1;
         setVersionStatus(joinStatus, data.v, '');
         renderPlayerList(joinPlayerList, [
           { name: hostInfo.name, color: SKIN_MAP[hostInfo.skin] ? SKIN_MAP[hostInfo.skin].color : '#3d5afe' },
           { name: effectiveName(), color: SKIN_MAP[mySkin].color },
         ]);
+      } else if (data.t === 'roster') {
+        // Version afinada de la lista de arriba: ya incluye a TODOS los
+        // conectados (por ejemplo, si se une un tercer jugador despues).
+        renderPlayerList(joinPlayerList, data.players);
       } else if (data.t === 'start') {
         hostInfo = data.host || hostInfo;
-        startGame('client', { name: effectiveName(), skin: mySkin, projectile: myProjectile }, hostInfo);
+        startGame(myClientSlot === 2 ? 'client2' : 'client', { name: effectiveName(), skin: mySkin, projectile: myProjectile }, hostInfo);
       } else if (data.t === 'state') {
         applyState(data);
       }
