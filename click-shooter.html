@@ -551,7 +551,7 @@
         <h1>CLICK SHOOTER</h1>
         <h2>Cruza las salas hasta el jefe — solo o en co-op</h2>
         <p>
-          Muevete con <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>, apunta con el raton y haz clic o manten pulsado para disparar.
+          Muevete con <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>, apunta con el raton y haz clic o manten pulsado para disparar. Si el jefe suelta una habilidad, actívala con <kbd>E</kbd>.
           Cada galaxia es un mapa de salas: limpia una, elige una mejora y cruza un portal hacia la siguiente. Llega a la sala del jefe, al otro lado del mapa, para abrir el portal a la galaxia siguiente. Las salas amarillas quedan fuera del camino y dan mejoras extra.
           El co-op usa una conexion directa entre los dos, gratis: no hace falta estar en la misma red, solo que cada uno tenga internet.
         </p>
@@ -685,7 +685,7 @@
   const BOSS_TYPES = [
     // Solo proyectiles en muchas direcciones: sin embestida, sin meteoritos, sin misiles.
     { name: 'EL DEVORADOR', color: '#ff4d4d', accent: '#ffb347', abilities: ['slam', 'nova', 'spiral'] },
-    // Solo ataques desde el aire: meteoritos y el orbe que se parte en tres.
+    // Meteoritos y una salva de tres orbes grandes que estallan en bolitas.
     { name: 'NUCLEO PRISMA', color: '#b44dff', accent: '#66e0ff', abilities: ['meteor', 'megaOrb'] },
     // La embestida aqui rebota una vez en la pared antes de frenar.
     { name: 'OJO CARMESI', color: '#ff2d78', accent: '#ffd166', abilities: ['charge', 'laser', 'summon', 'homing', 'crossbeam'] },
@@ -702,7 +702,7 @@
     homing: 'MISILES',
     meteor: 'LLUVIA DE METEOROS',
     crossbeam: 'RAYOS GIRATORIOS',
-    megaOrb: 'ORBE DE ENERGIA',
+    megaOrb: 'ORBES EXPLOSIVOS',
   };
 
   // ---------- mejoras y rarezas ----------
@@ -739,6 +739,11 @@
   // el jugador): 55 grados a cada lado, asi deja los flancos y la espalda
   // sin cubrir a proposito.
   const SHIELD_HALF_ANGLE = Math.PI * (55 / 180);
+  // Las habilidades ya NO son automaticas: se activan a mano con la tecla E
+  // y entran en enfriamiento. El escudo, ademas, solo dura unos segundos por
+  // activacion (antes cubria siempre mientras lo llevaras puesto).
+  const ABILITY_COOLDOWN = { laser: 3.5, meteor: 4.5, shield: 9 };
+  const SHIELD_DURATION = 4;
 
   function rollRarity(weights) {
     const total = weights.reduce((sum, [, w]) => sum + w, 0);
@@ -942,7 +947,15 @@
   };
 
   const keys = {};
-  window.addEventListener('keydown', e => { if (!escribiendo(e)) keys[e.key.toLowerCase()] = true; });
+  // Se pone a true al pulsar E (una vez por pulsacion, no mientras se
+  // mantiene) y lo consume el tick para activar la habilidad puesta.
+  let abilityFire = false;
+  window.addEventListener('keydown', e => {
+    if (escribiendo(e)) return;
+    const k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === 'e' && !e.repeat) abilityFire = true;
+  });
   window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
   const mouse = { x: 0, y: 0, down: false };
@@ -1305,7 +1318,7 @@
   // codigo no sabe leer y salen fallos raros (portales que no se ven, barras
   // vacias...) sin ningun error en pantalla. Se avisa en el lobby.
   // Subir este numero al cambiar lo que viaja en buildSnapshot().
-  const GAME_VERSION = 'salas-6';
+  const GAME_VERSION = 'salas-7';
 
   function sameVersion(theirs) {
     return theirs === GAME_VERSION;
@@ -1699,7 +1712,7 @@
       shootCooldown: 0, aim: 0, dead: false,
       name: info.name, color: SKIN_MAP[info.skin] ? SKIN_MAP[info.skin].color : '#3d5afe',
       projectile: PROJECTILE_MAP[info.projectile] ? info.projectile : 'bolt',
-      ability: null, abilityCd: 0, // habilidad dropeada por el jefe, ver ABILITY_TYPES
+      ability: null, abilityCd: 0, shieldTimer: 0, // habilidad dropeada por el jefe, se activa con E
     };
   }
 
@@ -1784,7 +1797,11 @@
     if (me && me.ability) {
       const meta = ABILITY_META[me.ability];
       abilityStat.style.display = '';
-      abilityNameEl.textContent = meta ? meta.label : me.ability;
+      const cd = me.abilityCd || 0;
+      const estado = cd > 0 ? ' (' + Math.ceil(cd) + 's)'
+        : (me.ability === 'shield' && me.shieldTimer > 0) ? ' (activo)'
+        : ' [E]';
+      abilityNameEl.textContent = (meta ? meta.label : me.ability) + estado;
       abilityNameEl.style.color = meta ? meta.color : '';
     } else {
       abilityStat.style.display = 'none';
@@ -2148,8 +2165,37 @@
       }
       sfx('laserFire');
     } else if (name === 'megaOrb') {
-      boss.stateTimer = 1.0;    // telegrafia antes de soltar el orbe
+      boss.stateTimer = 1.2;    // telegrafia antes de soltar la salva de orbes
     }
+  }
+
+  // Boss 2 (NUCLEO PRISMA): un orbe grande, algo mas grande que el jugador,
+  // con un fusible. Al agotarse (o al tocar a un jugador) explota en un
+  // anillo de bolitas -- ver burstOrb() y el bloque burstOrb del bucle de
+  // balas. Se lanzan tres de estos en abanico hacia el jugador.
+  function spawnBurstOrb(x, y, angle) {
+    bullets.push({
+      x, y,
+      vx: Math.cos(angle) * 170, vy: Math.sin(angle) * 170,
+      r: 19, life: 1.15, friendly: false, dmg: 18,
+      burstOrb: true, color: boss ? boss.accent : '#66e0ff',
+    });
+  }
+
+  function burstOrb(b) {
+    const count = (boss && boss.phase >= 3) ? 20 : 14;
+    const offset = rand(0, Math.PI * 2);
+    for (let i = 0; i < count; i++) {
+      const a = offset + (i / count) * Math.PI * 2;
+      bullets.push({
+        x: b.x, y: b.y,
+        vx: Math.cos(a) * 195, vy: Math.sin(a) * 195,
+        r: 6, life: 2.2, friendly: false, dmg: 9, color: b.color,
+      });
+    }
+    spawnParticles(b.x, b.y, b.color, 24);
+    shockwaves.push({ x: b.x, y: b.y, r: 8, maxR: 110, life: 0.4, maxLife: 0.4, color: b.color });
+    sfx('bomberExplode');
   }
 
   function bossFireBullet(x, y, angle, speed, r, dmg) {
@@ -2448,18 +2494,15 @@
       }
     }
 
-    // Suelta un orbe grande que, a mitad de camino, se abre en tres orbes
-    // mas (ver el bloque "splitOrbs" en el bucle de balas de hostTick).
+    // Salva de tres orbes grandes en abanico hacia el jugador; cada uno
+    // estalla en un anillo de bolitas (ver burstOrb y el bloque burstOrb del
+    // bucle de balas de hostTick).
     else if (boss.state === 'megaOrb') {
-      boss.telegraph = 1 - clamp(boss.stateTimer / 1.0, 0, 1);
+      boss.telegraph = 1 - clamp(boss.stateTimer / 1.2, 0, 1);
       if (boss.stateTimer <= 0) {
         const a = Math.atan2(target.y - boss.y, target.x - boss.x);
-        bullets.push({
-          x: boss.x, y: boss.y,
-          vx: Math.cos(a) * 150, vy: Math.sin(a) * 150,
-          r: 20, life: 1.5, friendly: false, dmg: 16,
-          splitOrbs: true, color: boss.accent,
-        });
+        const spread = 0.3;
+        for (let k = -1; k <= 1; k++) spawnBurstOrb(boss.x, boss.y, a + k * spread);
         sfx('whoosh');
         boss.state = 'idle';
         boss.telegraph = 0;
@@ -2582,42 +2625,56 @@
   }
 
   // ---------- habilidades del jugador (dropeadas por el jefe) ----------
-  // El escudo es pasivo (se gestiona en las colisiones de arriba via
-  // inShieldArc, sin temporizador). El laser y el meteoro son automaticos:
-  // se disparan solos contra el enemigo mas cercano cada pocos segundos
-  // mientras el jugador lleve esa habilidad puesta, mas flojos y pequenos
-  // que la version del jefe.
+  // Ya no son automaticas: el jugador las dispara con la tecla E (ver
+  // activateAbility) y entran en enfriamiento. Aqui solo se descuentan los
+  // temporizadores en cada tick del anfitrion.
   function updatePlayerAbilities(dt, activePlayers) {
     for (const p of activePlayers) {
-      if (p.dead || !p.ability || p.ability === 'shield') continue;
+      if (!p.ability) continue;
+      if (p.abilityCd > 0) p.abilityCd -= dt;
+      if (p.shieldTimer > 0) p.shieldTimer -= dt;
+    }
+  }
 
-      p.abilityCd -= dt;
-      if (p.abilityCd > 0) continue;
+  // Activa la habilidad puesta si no esta en enfriamiento. Laser y meteoro
+  // apuntan al enemigo mas cercano (o hacia donde mira el jugador si no hay
+  // ninguno); el escudo levanta el arco durante SHIELD_DURATION segundos.
+  // Solo lo llama el anfitrion: para el suyo desde hostTick, para los
+  // companeros al recibir su input con el flag de activacion.
+  function activateAbility(p) {
+    if (!p || p.dead || !p.ability || p.abilityCd > 0) return;
+    if (p.ability === 'shield' && p.shieldTimer > 0) return;
 
-      const target = nearestEnemyTarget(p.x, p.y);
-      if (!target) { p.abilityCd = 0.4; continue; }
+    const target = nearestEnemyTarget(p.x, p.y);
+    const aimAngle = target ? Math.atan2(target.y - p.y, target.x - p.x) : p.aim;
 
-      if (p.ability === 'laser') {
-        p.abilityCd = 2.6;
-        const angle = Math.atan2(target.y - p.y, target.x - p.x);
-        const fireTimer = 0.45;
-        beams.push({
-          x: p.x, y: p.y, angle,
-          width: 9, life: fireTimer, maxLife: fireTimer,
-          color: ABILITY_META.laser.color, owner: 'player', dmg: 26,
-        });
-        sfx('laserFire');
-      } else if (p.ability === 'meteor') {
-        p.abilityCd = 3.2;
-        const warn = 0.8;
-        meteors.push({
-          x: clamp(target.x + rand(-40, 40), 40, LOGICAL_W - 40),
-          y: clamp(target.y + rand(-40, 40), 40, LOGICAL_H - 40),
-          radius: 55, dmg: 26, warn, maxWarn: warn, exploded: false,
-          color: ABILITY_META.meteor.color, owner: 'player',
-        });
-        sfx('telegraph');
-      }
+    if (p.ability === 'shield') {
+      p.shieldTimer = SHIELD_DURATION;
+      p.abilityCd = ABILITY_COOLDOWN.shield;
+      sfx('shieldBlock');
+    } else if (p.ability === 'laser') {
+      p.abilityCd = ABILITY_COOLDOWN.laser;
+      const fireTimer = 0.5;
+      beams.push({
+        x: p.x, y: p.y, angle: aimAngle,
+        width: 10, life: fireTimer, maxLife: fireTimer,
+        color: ABILITY_META.laser.color, owner: 'player', dmg: 30,
+      });
+      sfx('laserFire');
+    } else if (p.ability === 'meteor') {
+      p.abilityCd = ABILITY_COOLDOWN.meteor;
+      const cx = target ? target.x : p.x + Math.cos(aimAngle) * 260;
+      const cy = target ? target.y : p.y + Math.sin(aimAngle) * 260;
+      // Mas grande y mas rapido que antes: radio 95 (antes 55), aviso 0.35s
+      // (antes 0.8, o sea cae mucho antes) y mas dano.
+      const warn = 0.35;
+      meteors.push({
+        x: clamp(cx + rand(-30, 30), 40, LOGICAL_W - 40),
+        y: clamp(cy + rand(-30, 30), 40, LOGICAL_H - 40),
+        radius: 95, dmg: 46, warn, maxWarn: warn, exploded: false,
+        color: ABILITY_META.meteor.color, owner: 'player',
+      });
+      sfx('meteor');
     }
   }
 
@@ -2766,7 +2823,7 @@
     if (keys['d']) mx += 1;
     const refX = me ? me.x : canvas.width / 2;
     const refY = me ? me.y : canvas.height / 2;
-    return { mx, my, aimAngle: Math.atan2(mouse.y - refY, mouse.x - refX), shooting: mouse.down };
+    return { mx, my, aimAngle: Math.atan2(mouse.y - refY, mouse.x - refX), shooting: mouse.down, activate: abilityFire };
   }
 
   function movePlayer(p, input, dt) {
@@ -2845,10 +2902,10 @@
     for (let k = 0; k < 4; k++) {
       pickups.push({ x: boss.x + rand(-60, 60), y: boss.y + rand(-60, 60), r: 8, life: 12, heal: 25 });
     }
-    // 10% de soltar TAMBIEN una habilidad (laser/meteoro/escudo). Solo una a
+    // 50% de soltar TAMBIEN una habilidad (laser/meteoro/escudo). Solo una a
     // la vez: si el que la recoge ya tenia otra, la pierde (ver la recogida
     // de pickups mas abajo).
-    if (Math.random() < 0.10) {
+    if (Math.random() < 0.50) {
       const abilityType = ABILITY_TYPES[Math.floor(Math.random() * ABILITY_TYPES.length)];
       pickups.push({ x: boss.x, y: boss.y, r: 10, life: 20, ability: abilityType });
     }
@@ -2874,7 +2931,7 @@
   // El escudo solo cubre un arco delante de hacia donde apunta el jugador
   // (ver SHIELD_HALF_ANGLE): deja flancos y espalda sin cubrir a proposito.
   function inShieldArc(p, threatX, threatY) {
-    if (p.ability !== 'shield') return false;
+    if (p.ability !== 'shield' || !(p.shieldTimer > 0)) return false;
     const angleToThreat = Math.atan2(threatY - p.y, threatX - p.x);
     let diff = angleToThreat - p.aim;
     while (diff > Math.PI) diff -= Math.PI * 2;
@@ -2890,7 +2947,9 @@
     if (ally2) activePlayers.push(ally2);
 
     const meInput = localInput();
+    abilityFire = false;
     if (!me.dead) { movePlayer(me, meInput, dt); tryShoot(me, meInput, dt); }
+    if (meInput.activate && !me.dead) activateAbility(me);
     if (ally && !ally.dead) { movePlayer(ally, remoteInput, dt); tryShoot(ally, remoteInput, dt); }
     if (ally2 && !ally2.dead) { movePlayer(ally2, remoteInput2, dt); tryShoot(ally2, remoteInput2, dt); }
 
@@ -2919,23 +2978,10 @@
       b.life -= dt;
       const offscreen = b.x < -20 || b.x > canvas.width + 20 || b.y < -20 || b.y > canvas.height + 20;
       if (b.life <= 0 || offscreen) {
-        // El orbe grande del megaOrb se abre en tres al llegar a su alcance
-        // maximo (pero no si se salio de la pantalla: no tiene sentido
-        // partirlo fuera de la vista).
-        if (b.splitOrbs && !offscreen) {
-          const baseAngle = rand(0, Math.PI * 2);
-          for (let k = 0; k < 3; k++) {
-            const a = baseAngle + (k / 3) * Math.PI * 2;
-            bullets.push({
-              x: b.x, y: b.y,
-              vx: Math.cos(a) * 230, vy: Math.sin(a) * 230,
-              r: 14, life: 2.6, friendly: false, dmg: 14, color: b.color,
-            });
-          }
-          spawnParticles(b.x, b.y, b.color, 22);
-          shockwaves.push({ x: b.x, y: b.y, r: 8, maxR: 90, life: 0.35, maxLife: 0.35, color: b.color });
-          sfx('meteor');
-        }
+        // Los orbes del megaOrb estallan en bolitas al agotarse su fusible
+        // (pero no si se salieron de la pantalla: no tiene sentido reventar
+        // fuera de la vista).
+        if (b.burstOrb && !offscreen) burstOrb(b);
         bullets.splice(i, 1);
       }
     }
@@ -3057,6 +3103,7 @@
             sfx('shieldBlock');
           } else {
             damagePlayer(p, b.dmg || 8);
+            if (b.burstOrb) burstOrb(b);
             bullets.splice(i, 1);
             spawnParticles(p.x, p.y, '#3d5afe', 6);
           }
@@ -3086,6 +3133,7 @@
           if (pk.ability) {
             p.ability = pk.ability;
             p.abilityCd = 0;
+            p.shieldTimer = 0;
             sfx('abilityGet');
             spawnParticles(p.x, p.y, (ABILITY_META[pk.ability] || ABILITY_META.laser).color, 16);
           } else {
@@ -3132,9 +3180,9 @@
       t: 'state',
       // Se manda tambien la velocidad para que el cliente pueda predecir su
       // propio movimiento sin esperar al host.
-      me: { x: r1(me.x), y: r1(me.y), hp: r1(me.hp), maxHp: me.maxHp, aim: r2(me.aim), dead: me.dead, name: me.name, color: me.color, speed: r1(me.speed), r: me.r, ability: me.ability },
-      ally: ally ? { x: r1(ally.x), y: r1(ally.y), hp: r1(ally.hp), maxHp: ally.maxHp, aim: r2(ally.aim), dead: ally.dead, name: ally.name, color: ally.color, speed: r1(ally.speed), r: ally.r, ability: ally.ability } : null,
-      ally2: ally2 ? { x: r1(ally2.x), y: r1(ally2.y), hp: r1(ally2.hp), maxHp: ally2.maxHp, aim: r2(ally2.aim), dead: ally2.dead, name: ally2.name, color: ally2.color, speed: r1(ally2.speed), r: ally2.r, ability: ally2.ability } : null,
+      me: { x: r1(me.x), y: r1(me.y), hp: r1(me.hp), maxHp: me.maxHp, aim: r2(me.aim), dead: me.dead, name: me.name, color: me.color, speed: r1(me.speed), r: me.r, ability: me.ability, abilityCd: r2(me.abilityCd), shieldTimer: r2(me.shieldTimer) },
+      ally: ally ? { x: r1(ally.x), y: r1(ally.y), hp: r1(ally.hp), maxHp: ally.maxHp, aim: r2(ally.aim), dead: ally.dead, name: ally.name, color: ally.color, speed: r1(ally.speed), r: ally.r, ability: ally.ability, abilityCd: r2(ally.abilityCd), shieldTimer: r2(ally.shieldTimer) } : null,
+      ally2: ally2 ? { x: r1(ally2.x), y: r1(ally2.y), hp: r1(ally2.hp), maxHp: ally2.maxHp, aim: r2(ally2.aim), dead: ally2.dead, name: ally2.name, color: ally2.color, speed: r1(ally2.speed), r: ally2.r, ability: ally2.ability, abilityCd: r2(ally2.abilityCd), shieldTimer: r2(ally2.shieldTimer) } : null,
       // Arrays planos de numeros en vez de objetos: un objeto repite el nombre
       // de cada campo por cada elemento ("x","y","r","friendly","style"...),
       // lo que con cientos de balas multiplica el tamano del paquete.
@@ -3146,7 +3194,7 @@
       ]),
       // Bala: [x, y, vx, vy, r, estilo]  (estilo -1 = bala enemiga normal;
       // -2 o menos = bala enemiga con color propio, indexado en NET_COLORS:
-      // -(2+indice). El megaOrb y sus tres hijos son los unicos que lo usan.
+      // -(2+indice). Los orbes del megaOrb y sus bolitas son los unicos que lo usan.
       bu: bullets.flatMap(b => {
         let style = -1;
         if (b.friendly) style = PROJECTILE_IDS.indexOf(b.style);
@@ -3220,7 +3268,8 @@
     if (gameOverFlag) return;
 
     const inp = localInput();
-    safeSend({ t: 'input', mx: inp.mx, my: inp.my, aim: inp.aimAngle, shooting: inp.shooting });
+    safeSend({ t: 'input', mx: inp.mx, my: inp.my, aim: inp.aimAngle, shooting: inp.shooting, act: inp.activate });
+    abilityFire = false;
 
     // 1. Prediccion del movimiento propio: respuesta inmediata al teclado.
     if (me && !me.dead && me.speed) {
@@ -3329,6 +3378,8 @@
         me.speed = hostMe.speed;
         me.r = hostMe.r;
         me.ability = hostMe.ability;
+        me.abilityCd = hostMe.abilityCd;
+        me.shieldTimer = hostMe.shieldTimer;
       }
     }
 
@@ -3599,7 +3650,7 @@
   // apunta el jugador (ver SHIELD_HALF_ANGLE), asi que se dibuja centrado en
   // ese angulo para que se vea claramente por donde protege y por donde no.
   function drawShieldFor(p, ang) {
-    if (!p || p.dead || p.ability !== 'shield') return;
+    if (!p || p.dead || p.ability !== 'shield' || !(p.shieldTimer > 0)) return;
     const r = p.r + 22;
     ctx.save();
     ctx.translate(p.x, p.y);
@@ -4278,6 +4329,7 @@
       if (data.t === 'input') {
         const input = { mx: data.mx, my: data.my, aimAngle: data.aim, shooting: data.shooting };
         if (slot === 1) remoteInput = input; else remoteInput2 = input;
+        if (data.act) activateAbility(slot === 1 ? ally : ally2);
       } else if (data.t === 'upgrade') {
         chooseUpgrade(slot === 1 ? 'ally' : 'ally2', data.index);
       }
