@@ -1012,6 +1012,10 @@
   const PROJECTILE_IDS = PROJECTILES.map(p => p.id);
 
   // ============ CUENTAS + GUARDADO EN LA NUBE (Firebase) ============
+  // Cuentas con modo pruebas (panel de admin + todos los cosmeticos). Se
+  // comprueban en minusculas; la cuenta la crea su dueño desde el menu.
+  const ADMIN_USERNAMES = ['osaman', 'dreyk'];
+
   // La apiKey de una app web de Firebase NO es un secreto (identifica el
   // proyecto, no autoriza nada): la seguridad esta en las reglas de Firestore
   // (cada cuenta solo puede leer/escribir su propio documento saves/{uid}).
@@ -1137,9 +1141,9 @@
       save: () => save,
       user: () => user,
       enabled: () => ready,
-      // La cuenta "Osaman" (cualquier caja) es la de pruebas: desbloquea el
-      // panel de admin y todos los cosmeticos.
-      isAdmin: () => !!(save && String(save.username || '').trim().toLowerCase() === 'osaman'),
+      // Cuentas de pruebas: desbloquean el panel de admin y todos los
+      // cosmeticos. Se comparan sin distinguir mayusculas.
+      isAdmin: () => !!(save && ADMIN_USERNAMES.indexOf(String(save.username || '').trim().toLowerCase()) !== -1),
       persist: () => scheduleWrite(),
 
       init() {
