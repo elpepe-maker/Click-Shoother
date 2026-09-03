@@ -609,6 +609,7 @@
     <div id="hud">
       <div>
         <span class="stat">Puntos: <b id="score">0</b></span>
+        <span class="stat">Créditos: <b id="credits" style="color:#ffd23c;">0</b></span>
         <span class="stat">Galaxia: <b id="galaxy">1</b></span>
         <span class="stat">Salas: <b id="rooms">0</b></span>
         <span class="stat">Mejoras: <b id="level">0</b></span>
@@ -705,11 +706,17 @@
             <span class="picker-label">Proyectil</span>
             <div id="projectile-picker" class="swatch-row"></div>
           </div>
+          <div class="picker-row">
+            <span class="picker-label">Nave</span>
+            <div id="ship-picker" class="swatch-row"></div>
+          </div>
+          <p id="ship-desc" style="margin:2px 0 0;font-size:12px;color:#9fb0c8;"></p>
         </div>
 
         <div id="mode-buttons">
           <button id="continue-btn" class="hidden">Continuar partida</button>
           <button id="solo-btn">Play Solo</button>
+          <button id="daily-btn" class="secondary">Reto diario</button>
           <button id="host-btn" class="secondary">Host Co-op</button>
           <button id="join-btn" class="secondary">Join Co-op</button>
           <button id="spectate-btn" class="secondary hidden">Ver partida</button>
@@ -747,6 +754,7 @@
       <div id="gameover-panel" class="hidden">
         <h1>GAME OVER</h1>
         <h2 id="gameover-sub"></h2>
+        <div id="daily-board" class="hidden" style="margin:8px auto 12px;max-width:340px;font-size:13px;text-align:left;"></div>
         <button id="playagain-btn">Play Again</button>
       </div>
     </div>
@@ -779,6 +787,7 @@
   const menuPanel = document.getElementById('menu-panel');
   const gameoverPanel = document.getElementById('gameover-panel');
   const gameoverSub = document.getElementById('gameover-sub');
+  const dailyBoard = document.getElementById('daily-board');
   const identityPanel = document.getElementById('identity-panel');
   const modeButtons = document.getElementById('mode-buttons');
   const hostPanel = document.getElementById('host-panel');
@@ -791,6 +800,8 @@
   const nameInput = document.getElementById('name-input');
   const skinPicker = document.getElementById('skin-picker');
   const projectilePicker = document.getElementById('projectile-picker');
+  const shipPicker = document.getElementById('ship-picker');
+  const shipDesc = document.getElementById('ship-desc');
   const hostPlayerList = document.getElementById('host-player-list');
   const joinPlayerList = document.getElementById('join-player-list');
   const joinWaitText = document.getElementById('join-wait-text');
@@ -808,6 +819,7 @@
   const continueBtn = document.getElementById('continue-btn');
 
   const scoreEl = document.getElementById('score');
+  const creditsEl = document.getElementById('credits');
   const galaxyEl = document.getElementById('galaxy');
   const roomsEl = document.getElementById('rooms');
   const levelEl = document.getElementById('level');
@@ -989,6 +1001,17 @@
     { name: 'Railgun Barrel', rarity: 'exotic', desc: '+48% bullet range', apply: mulBulletLife(1.48) },
     { name: 'Triple Cannon', rarity: 'exotic', desc: '+3 projectiles per shot', apply: addShotCount(3) },
     { name: 'Tungsten Core', rarity: 'exotic', desc: 'Bullets pierce 3 more enemies', apply: addPierce(3) },
+    // ---- transformaciones: cambian COMO disparas, no solo los numeros ----
+    { name: 'Dron de combate', rarity: 'legendary', desc: 'Un dron que orbita y dispara solo (máx 2)',
+      apply: p => { p.drones = Math.min(2, (p.drones || 0) + 1); } },
+    { name: 'Enjambre', rarity: 'exotic', desc: 'Dos drones de combate orbitando',
+      apply: p => { p.drones = 2; } },
+    { name: 'Cañón de carga', rarity: 'exotic', desc: 'Mantén para cargar un disparo devastador',
+      apply: p => { p.chargeShot = true; } },
+    { name: 'Balas de rebote', rarity: 'exotic', desc: 'Tus balas rebotan una vez en las paredes',
+      apply: p => { p.ricochet = true; } },
+    { name: 'Torreta trasera', rarity: 'legendary', desc: 'Disparas también hacia atrás',
+      apply: p => { p.backshot = true; } },
   ];
 
   // Reparte 3 (o 1, en sala extra) mejoras: la calidad de CADA una se tira
@@ -1027,6 +1050,21 @@
     { id: 'star', name: 'Estrella', color: '#ffe066', shape: 'star', r: 6 },
     { id: 'baguette', name: 'Baguette', color: '#e0a458', accent: '#7a4a1f', shape: 'baguette', length: 26, width: 9, r: 6 },
   ];
+  // Naves: cambian los stats de arranque y traen un pasivo. "base" son
+  // sobrescrituras que se aplican encima de los valores por defecto de
+  // makePlayer(). El pasivo se ejecuta en applyShipPassive() (host).
+  const SHIPS = [
+    { id: 'vanguard', name: 'Vanguardia', color: '#9fdcff', desc: 'Equilibrada. Sin pasivo.', base: {}, passive: null },
+    { id: 'fortress', name: 'Fortaleza', color: '#8b9fd6', desc: 'Lenta y dura. Regenera vida fuera de combate.',
+      base: { maxHp: 150, hp: 150, speed: 220, fireRate: 0.17 }, passive: 'regen' },
+    { id: 'needle', name: 'Aguja', color: '#ff6a9c', desc: 'Cristal: mucho daño y cadencia, poca vida.',
+      base: { maxHp: 70, hp: 70, dmg: 14, fireRate: 0.11, speed: 285 }, passive: 'glass' },
+    { id: 'twin', name: 'Gemela', color: '#7cffb0', desc: 'Empieza con un dron de combate.',
+      base: { drones: 1 }, passive: null },
+  ];
+  const SHIP_MAP = Object.fromEntries(SHIPS.map(s => [s.id, s]));
+  const DEFAULT_SHIP = 'vanguard';
+
   const SKIN_MAP = Object.fromEntries(SKINS.map(s => [s.id, s]));
   const PROJECTILE_MAP = Object.fromEntries(PROJECTILES.map(p => [p.id, p]));
 
@@ -1059,8 +1097,8 @@
   function defaultSave() {
     return {
       username: '',
-      identity: { name: myName, skin: 'blue', projectile: 'bolt' },
-      unlocks: { skins: [], projectiles: [] },
+      identity: { name: myName, skin: 'blue', projectile: 'bolt', ship: 'vanguard' },
+      unlocks: { skins: [], projectiles: [], ships: [] },
       stats: { bestGalaxy: 1, bestScore: 0, bossesKilled: 0, roomsTotal: 0, runs: 0 },
       savedRun: null,
     };
@@ -1075,6 +1113,7 @@
       unlocks: {
         skins: Array.isArray(un.skins) ? un.skins.slice() : [],
         projectiles: Array.isArray(un.projectiles) ? un.projectiles.slice() : [],
+        ships: Array.isArray(un.ships) ? un.ships.slice() : [],
       },
       stats: Object.assign(d.stats, s.stats || {}),
       savedRun: s.savedRun || null,
@@ -1129,10 +1168,12 @@
       if (id.name) { myName = String(id.name).slice(0, 14); nameInput.value = myName; }
       if (SKIN_MAP[id.skin]) mySkin = id.skin;
       if (PROJECTILE_MAP[id.projectile]) myProjectile = id.projectile;
+      if (SHIP_MAP[id.ship]) myShip = id.ship;
       try {
         localStorage.setItem('cs_name', myName);
         localStorage.setItem('cs_skin', mySkin);
         localStorage.setItem('cs_proj', myProjectile);
+        localStorage.setItem('cs_ship', myShip);
       } catch (e) {}
     }
 
@@ -1141,15 +1182,18 @@
     function grantUnlocks() {
       if (!save) return [];
       const fresh = [];
-      for (const kind of ['skin', 'projectile']) {
-        const list = kind === 'skin' ? save.unlocks.skins : save.unlocks.projectiles;
+      const listFor = { skin: save.unlocks.skins, projectile: save.unlocks.projectiles, ship: save.unlocks.ships };
+      const mapFor = { skin: SKIN_MAP, projectile: PROJECTILE_MAP, ship: SHIP_MAP };
+      const wordFor = { skin: 'skin ', projectile: 'proyectil ', ship: 'nave ' };
+      for (const kind of ['skin', 'projectile', 'ship']) {
+        const list = listFor[kind];
         for (const id in COSMETIC_UNLOCKS[kind]) {
           if (list.indexOf(id) !== -1) continue;
           const req = COSMETIC_UNLOCKS[kind][id];
           if ((save.stats[req.stat] || 0) >= req.need) {
             list.push(id);
-            const meta = (kind === 'skin' ? SKIN_MAP : PROJECTILE_MAP)[id];
-            fresh.push((kind === 'skin' ? 'skin ' : 'proyectil ') + (meta ? meta.name : id));
+            const meta = mapFor[kind][id];
+            fresh.push(wordFor[kind] + (meta ? meta.name : id));
           }
         }
       }
@@ -1210,7 +1254,7 @@
 
       syncIdentity() {
         if (!user || !save) return;
-        save.identity = { name: effectiveName(), skin: mySkin, projectile: myProjectile };
+        save.identity = { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip };
         scheduleWrite();
       },
       setSavedRun(run) {
@@ -1246,6 +1290,31 @@
         flushWrite();
         updateContinueButton();
         return fresh;
+      },
+
+      // ---- reto diario ----
+      dailyId() { return new Date().toISOString().slice(0, 10); },
+      // Escribe la puntuacion del dia SOLO si mejora la marca previa del jugador.
+      async submitDaily(res) {
+        if (!ready || !db || !user || !save) return;
+        const ref = db.collection('daily').doc(this.dailyId()).collection('scores').doc(user.uid);
+        try {
+          const prev = await ref.get();
+          if (prev.exists && (prev.data().score || 0) >= (res.score || 0)) return;
+          await ref.set({
+            username: save.username || 'jugador',
+            score: res.score | 0, galaxy: res.galaxy | 0, ship: myShip,
+            at: firebase.firestore.FieldValue.serverTimestamp(),
+          });
+        } catch (e) { console.warn('[daily] no se pudo enviar:', e && e.code); }
+      },
+      async fetchDaily(limit) {
+        if (!ready || !db) return [];
+        try {
+          const q = await db.collection('daily').doc(this.dailyId()).collection('scores')
+            .orderBy('score', 'desc').limit(limit || 20).get();
+          return q.docs.map(d => Object.assign({ uid: d.id }, d.data()));
+        } catch (e) { console.warn('[daily] no se pudo leer:', e && e.code); return []; }
       },
     };
   })();
@@ -1284,29 +1353,41 @@
       star:     { stat: 'roomsTotal',   need: 30, desc: 'Limpia 30 salas en total' },
       baguette: { stat: 'bossesKilled', need: 3,  desc: 'Derrota 3 jefes' },
     },
+    ship: {
+      fortress: { stat: 'roomsTotal',   need: 20, desc: 'Limpia 20 salas en total' },
+      needle:   { stat: 'bossesKilled', need: 5,  desc: 'Derrota 5 jefes' },
+      twin:     { stat: 'runs',         need: 10, desc: 'Juega 10 partidas' },
+    },
   };
-  // kind: 'skin' | 'projectile'
+  // kind: 'skin' | 'projectile' | 'ship'
   function cosmeticLock(kind, id) { return COSMETIC_UNLOCKS[kind] && COSMETIC_UNLOCKS[kind][id]; }
+  function unlockList(kind) {
+    const s = Cloud.save();
+    if (!s) return null;
+    return kind === 'skin' ? s.unlocks.skins : kind === 'projectile' ? s.unlocks.projectiles : s.unlocks.ships;
+  }
   function isCosmeticUnlocked(kind, id) {
     if (!cosmeticLock(kind, id)) return true;                 // no es desbloqueable
     if (Cloud.isAdmin()) return true;                         // cuenta de pruebas: todo abierto
-    const s = Cloud.save();
-    if (!s) return false;                                     // invitado
-    const list = kind === 'skin' ? s.unlocks.skins : s.unlocks.projectiles;
+    const list = unlockList(kind);
+    if (!list) return false;                                  // invitado
     return list.indexOf(id) !== -1;
   }
 
-  // ---------- identity (name / skin / projectile) ----------
+  // ---------- identity (name / skin / projectile / ship) ----------
   let myName = localStorage.getItem('cs_name') || 'Jugador';
   let mySkin = localStorage.getItem('cs_skin') || DEFAULT_SKIN;
   let myProjectile = localStorage.getItem('cs_proj') || DEFAULT_PROJ;
+  let myShip = localStorage.getItem('cs_ship') || DEFAULT_SHIP;
   if (!SKIN_MAP[mySkin]) mySkin = DEFAULT_SKIN;
   if (!PROJECTILE_MAP[myProjectile]) myProjectile = DEFAULT_PROJ;
+  if (!SHIP_MAP[myShip]) myShip = DEFAULT_SHIP;
 
   function saveIdentity() {
     localStorage.setItem('cs_name', myName);
     localStorage.setItem('cs_skin', mySkin);
     localStorage.setItem('cs_proj', myProjectile);
+    localStorage.setItem('cs_ship', myShip);
     Cloud.syncIdentity();
   }
   function effectiveName() {
@@ -1341,8 +1422,14 @@
     // de una version vieja sin bloqueos), se vuelve al de por defecto.
     if (!isCosmeticUnlocked('skin', mySkin)) mySkin = DEFAULT_SKIN;
     if (!isCosmeticUnlocked('projectile', myProjectile)) myProjectile = DEFAULT_PROJ;
+    if (!isCosmeticUnlocked('ship', myShip)) myShip = DEFAULT_SHIP;
     renderSwatches(skinPicker, SKINS, mySkin, 'skin', id => { mySkin = id; saveIdentity(); refreshPickers(); });
     renderSwatches(projectilePicker, PROJECTILES, myProjectile, 'projectile', id => { myProjectile = id; saveIdentity(); refreshPickers(); });
+    if (shipPicker) {
+      renderSwatches(shipPicker, SHIPS, myShip, 'ship', id => { myShip = id; saveIdentity(); refreshPickers(); });
+      const s = SHIP_MAP[myShip];
+      if (shipDesc) shipDesc.textContent = s ? s.desc : '';
+    }
   }
   refreshPickers();
 
@@ -1404,7 +1491,39 @@
   // ---------- utility ----------
   function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  // PRNG con semilla (mulberry32). Solo lo usa la GENERACION del piso: mapa de
+  // salas, modificadores, secuencia de tipos de enemigo. Asi el "reto diario"
+  // sale igual para todos. El combate en si sigue con Math.random (depende de
+  // la habilidad del jugador, no hace falta que sea determinista).
+  function makeRng(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function seedFromDate(d) {
+    const s = d || new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  // Fuente de aleatoriedad para la generacion del piso. En modo normal es
+  // Math.random; en modo diario se sustituye por un makeRng() sembrado. OJO:
+  // solo la generacion del piso puede usar srand()/mapRng. Si el combate
+  // consumiera de este mismo flujo, el numero de tiradas dependeria de los
+  // FPS y de lo que haga el jugador, y dos personas con la misma semilla
+  // acabarian con mapas distintos.
+  let mapRng = Math.random;
+  let dailyMode = false;
+  let dailySeed = 0;
+  // rand(): combate y efectos, SIEMPRE Math.random.
   function rand(min, max) { return Math.random() * (max - min) + min; }
+  // srand(): SOLO generacion del piso (generateMap, rollEnemyType, modificadores).
+  function srand(min, max) { return mapRng() * (max - min) + min; }
   function randomCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let s = '';
@@ -1752,7 +1871,7 @@
   // codigo no sabe leer y salen fallos raros (portales que no se ven, barras
   // vacias...) sin ningun error en pantalla. Se avisa en el lobby.
   // Subir este numero al cambiar lo que viaja en buildSnapshot().
-  const GAME_VERSION = 'salas-9';
+  const GAME_VERSION = 'salas-10';
 
   function sameVersion(theirs) {
     return theirs === GAME_VERSION;
@@ -1810,6 +1929,7 @@
   let remoteInput2 = { mx: 0, my: 0, aimAngle: 0, shooting: false };
   let netSendTimer = 0;
   let lastShownLevelUpId = 0;
+  let lastBannerRoomKey = ''; // cliente: para disparar el aviso de sala al cambiar
   let myUpgradeSent = false;
   let clientGameOverShown = false;
   // Interruptores del panel de pruebas (cuenta admin). Todos empiezan
@@ -1836,7 +1956,70 @@
 
   // ---------- mapa de salas ----------
   const GRID = 6;
-  const ROOM_NONE = 0, ROOM_START = 1, ROOM_NORMAL = 2, ROOM_BONUS = 3, ROOM_BOSS = 4, ROOM_MINIBOSS = 5;
+  // El tipo viaja en el mapa comprimido: hasta 15 (4 bits) ahora que hay
+  // tienda y trato. Ver buildSnapshot/applyState/serializeRun (mascara & 15).
+  const ROOM_NONE = 0, ROOM_START = 1, ROOM_NORMAL = 2, ROOM_BONUS = 3, ROOM_BOSS = 4,
+        ROOM_MINIBOSS = 5, ROOM_SHOP = 6, ROOM_DEAL = 7;
+
+  // Modificadores de sala (solo salas normales). Cambian el ritmo de una sala
+  // sin geometria nueva. El id viaja en el array "mods" del snapshot.
+  const ROOM_MODS = {
+    oscuridad:    { label: 'OSCURIDAD',      color: '#6c7bd6', blurb: 'Visibilidad reducida' },
+    horda:        { label: 'HORDA',          color: '#ff7b3c', blurb: 'El doble de enemigos, mitad de vida' },
+    reto:         { label: 'RETO: SIN DAÑO', color: '#7cf0ff', blurb: 'Límpiala sin que te toquen para una mejora extra' },
+    contrarreloj: { label: 'CONTRARRELOJ',   color: '#ffd23c', blurb: 'Límpiala rápido para un botín' },
+    maldicion:    { label: 'SALA MALDITA',   color: '#c15aff', blurb: '−vida máxima, pero mejor recompensa' },
+  };
+  const ROOM_MOD_IDS = Object.keys(ROOM_MODS);
+
+  // ---------- afijos de enemigos (elites) ----------
+  // Un enemigo normal con una etiqueta: reutiliza toda la maquinaria de
+  // enemigos, solo anade un puñado de if en el bucle de hostTick. El id viaja
+  // como un byte extra en el array "en" del snapshot.
+  const AFFIX_META = {
+    veloz:     { label: 'veloz',     aura: '#ffe066' },
+    blindado:  { label: 'blindado',  aura: '#9fb4d6' },
+    explosivo: { label: 'explosivo', aura: '#ff7b1a' },
+    sanador:   { label: 'sanador',   aura: '#3cff8f' },
+    invocador: { label: 'invocador', aura: '#c15aff' },
+  };
+  const AFFIX_IDS = Object.keys(AFFIX_META);
+
+  // ---------- pods de tienda / trato ----------
+  const POD_KINDS = {
+    upgrade: { label: 'Mejora' },
+    heal:    { label: 'Reparación' },
+    ability: { label: 'Habilidad' },
+    deal:    { label: 'Pacto' },       // mejora potente + maldicion
+  };
+  const POD_KIND_IDS = Object.keys(POD_KINDS);
+
+  // ---------- maldiciones (tratos) ----------
+  // Modificador negativo permanente de la partida. Se guarda el id en
+  // p.curses[] para poder mostrarlo; el efecto se aplica al cogerlo y, los que
+  // son "pasivos" (enemigos con mas vida), se leen de un flag global.
+  const CURSES = {
+    fragil:   { label: 'Frágil',       desc: '−25 vida máxima',        apply: p => { p.maxHp = Math.max(40, p.maxHp - 25); p.hp = Math.min(p.hp, p.maxHp); } },
+    lento:    { label: 'Lastre',       desc: '−12% velocidad',         apply: p => { p.speed = Math.max(120, p.speed * 0.88); } },
+    temblor:  { label: 'Pulso débil',  desc: '+40% dispersión',        apply: p => { p.spread = p.spread * 1.4 + 0.03; } },
+    escaso:   { label: 'Cargador corto', desc: '−15% alcance de bala', apply: p => { p.bulletLife = Math.max(0.5, p.bulletLife * 0.85); } },
+    plaga:    { label: 'Plaga',        desc: 'Enemigos +12% vida',     apply: p => { curseEnemyHp += 0.12; } },
+  };
+  const CURSE_IDS = Object.keys(CURSES);
+  let curseEnemyHp = 0; // suma de las maldiciones "plaga" activas
+
+  // ---------- temas de galaxia ----------
+  // El tema activo se deriva de "galaxy" (sin campo de red nuevo). Cada uno
+  // tiene su fondo y, algunos, una regla global sencilla (rule).
+  const GALAXY_THEMES = [
+    { name: 'Vacío Azul',        bg: ['#0b0d12', '#141a2e'], star: '#8fb4ff', rule: null },
+    { name: 'Campo de Asteroides', bg: ['#0d0b08', '#241a12'], star: '#ffd9a0', rule: 'asteroides' },
+    { name: 'Nebulosa Carmesí',  bg: ['#140810', '#2a0f1e'], star: '#ff9ecb', rule: 'nebulosa' },
+    { name: 'Tormenta Iónica',   bg: ['#08131a', '#0e2836'], star: '#7cf0ff', rule: 'ionica' },
+    { name: 'Cinturón Verde',    bg: ['#08120c', '#123020'], star: '#9effc4', rule: 'gravedad' },
+    { name: 'Horizonte Violeta', bg: ['#0d0818', '#1d1030'], star: '#c9a0ff', rule: null },
+  ];
+  function galaxyTheme() { return GALAXY_THEMES[(galaxy - 1) % GALAXY_THEMES.length]; }
 
   let galaxy = 1;
   let roomGrid = [];          // roomGrid[y][x] = sala o null
@@ -1847,18 +2030,26 @@
   let galaxyPortal = null;
   let portalCooldown = 0;     // evita rebotar al entrar por un portal
   let pendingUpgrades = 0;    // las salas bonus dan mas de una mejora
+  let credits = 0;            // moneda del equipo (tienda / trato)
+  let pods = [];              // objetos interactuables de tienda / trato
+  let debris = [];            // asteroides del tema de galaxia (dañan al tocar)
+  let roomHitless = false;    // sala "reto": nadie ha recibido daño todavia
+  let roomTimer = 0;          // sala "contrarreloj": segundos restantes
+  let roomBanner = null;      // { text, sub, color, t } aviso grande al entrar
 
   function makeRoom(gx, gy, type) {
-    return { gx, gy, type, cleared: false, visited: false };
+    return { gx, gy, type, cleared: false, visited: false, mod: null };
   }
 
   // Genera el piso: sala inicial en un borde, jefe en el opuesto, un camino
   // entre ambas, y salas extra colgando del camino como recompensa opcional.
+  // Toda la aleatoriedad va por srand()/mapRng: en el reto diario el piso sale
+  // igual para todo el mundo (ver makeRng / seedFromDate).
   function generateMap() {
     roomGrid = Array.from({ length: GRID }, () => Array(GRID).fill(null));
 
-    const startY = Math.floor(rand(0, GRID));
-    const bossY = Math.floor(rand(0, GRID));
+    const startY = Math.floor(srand(0, GRID));
+    const bossY = Math.floor(srand(0, GRID));
 
     // Camino desde la columna 0 hasta la ultima, avanzando y serpenteando.
     const path = [];
@@ -1866,10 +2057,10 @@
     path.push({ gx: cx, gy: cy });
 
     while (cx < GRID - 1) {
-      if (Math.random() < 0.58 || cy === bossY) {
+      if (mapRng() < 0.58 || cy === bossY) {
         cx++;
       } else {
-        const step = Math.sign(bossY - cy) || (Math.random() < 0.5 ? 1 : -1);
+        const step = Math.sign(bossY - cy) || (mapRng() < 0.5 ? 1 : -1);
         cy = clamp(cy + step, 0, GRID - 1);
       }
       path.push({ gx: cx, gy: cy });
@@ -1890,12 +2081,12 @@
     // Salas bonus colgando del camino (sin pisar inicio ni jefe).
     const offsets = [[0, -1], [0, 1], [-1, 0], [1, 0]];
     let attempts = 0, added = 0;
-    const wanted = 4 + Math.floor(rand(0, 3));
+    const wanted = 4 + Math.floor(srand(0, 3));
 
     while (added < wanted && attempts < 200) {
       attempts++;
-      const base = path[Math.floor(rand(1, path.length - 1))];
-      const off = offsets[Math.floor(rand(0, 4))];
+      const base = path[Math.floor(srand(1, path.length - 1))];
+      const off = offsets[Math.floor(srand(0, 4))];
       const nx = base.gx + off[0], ny = base.gy + off[1];
 
       if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) continue;
@@ -1905,12 +2096,10 @@
       added++;
     }
 
-    // Una sala de miniboss por piso, siempre: se reune TODA celda libre
-    // pegada al camino (en vez de tirar al azar y esperar acertar), asi no
-    // se queda sin sitio ni cuando las bonus ya han ocupado casi todo.
-    // Igual que las bonus, sin pisar inicio ni jefe: las extra siempre
-    // cuelgan de una sala normal, nunca de otra extra (si no, quedaria
-    // inalcanzable: ver isExtraRoomType() y el filtro en openPortals()).
+    // Celdas libres pegadas a un conjunto de salas (sin pisar nada). Se usa
+    // para colocar las salas "extra" (miniboss, tienda, trato): igual que las
+    // bonus, siempre cuelgan de una sala normal, nunca de otra extra (si no,
+    // quedaria inalcanzable: ver isExtraRoomType() y el filtro en openPortals()).
     function freeCellsNextTo(rooms) {
       const found = new Map();
       for (const r of rooms) {
@@ -1924,24 +2113,38 @@
       return found;
     }
 
-    let miniCandidates = freeCellsNextTo(path.slice(1, -1));
-    if (!miniCandidates.size) {
-      // No quedaba hueco junto al camino: se prueba junto a CUALQUIER sala
-      // que no sea extra (incluido inicio o jefe), mejor que arriesgarse a
-      // dejarla pegada solo a otra extra.
-      const noExtra = roomGrid.flat().filter(r => r && !isExtraRoomType(r.type));
-      miniCandidates = freeCellsNextTo(noExtra);
+    // Coloca una sala del tipo dado en una celda libre pegada al camino. Tres
+    // niveles de reserva para no dejarla nunca en una celda sin vecinos
+    // validos (ver el historial del miniboss).
+    function placeExtra(type) {
+      let cand = freeCellsNextTo(path.slice(1, -1));
+      if (!cand.size) cand = freeCellsNextTo(roomGrid.flat().filter(r => r && !isExtraRoomType(r.type)));
+      if (!cand.size) cand = freeCellsNextTo(roomGrid.flat().filter(Boolean));
+      if (!cand.size) return false;
+      const options = [...cand.values()];
+      const [mx, my] = options[Math.floor(srand(0, options.length))];
+      roomGrid[my][mx] = makeRoom(mx, my, type);
+      return true;
     }
-    if (!miniCandidates.size) {
-      // Ultimo recurso: pegada a lo que sea, aunque sea otra extra. Sigue
-      // siendo mejor que una celda suelta sin ningun vecino (inalcanzable
-      // seguro), aunque no se pueda garantizar que se pueda entrar.
-      miniCandidates = freeCellsNextTo(roomGrid.flat().filter(Boolean));
-    }
-    if (miniCandidates.size) {
-      const options = [...miniCandidates.values()];
-      const [mx, my] = options[Math.floor(rand(0, options.length))];
-      roomGrid[my][mx] = makeRoom(mx, my, ROOM_MINIBOSS);
+
+    // Una de miniboss y una de tienda siempre; la de trato ~55% de las veces.
+    placeExtra(ROOM_MINIBOSS);
+    placeExtra(ROOM_SHOP);
+    if (mapRng() < 0.55) placeExtra(ROOM_DEAL);
+
+    // Modificadores de sala: se reparten entre las salas NORMALES del camino
+    // (nunca inicio, jefe ni extra). Mas probables cuanto mas avanzada la
+    // galaxia. Como mucho una fraccion del camino, para que no sea agobiante.
+    const normals = roomGrid.flat().filter(r => r && r.type === ROOM_NORMAL);
+    const modChance = clamp(0.18 + (galaxy - 1) * 0.06, 0.18, 0.5);
+    const maxMods = Math.max(1, Math.round(normals.length * 0.45));
+    let modded = 0;
+    for (const r of normals) {
+      if (modded >= maxMods) break;
+      if (mapRng() < modChance) {
+        r.mod = ROOM_MOD_IDS[Math.floor(srand(0, ROOM_MOD_IDS.length))];
+        modded++;
+      }
     }
 
     return roomGrid[startY][0];
@@ -1960,10 +2163,11 @@
     { dx: 1, dy: 0, x: LOGICAL_W - 74, y: LOGICAL_H / 2 },
   ];
 
-  // Bonus y miniboss son "salas extra": solo se puede entrar en ellas desde
-  // una sala normal, nunca saltar de una extra a otra.
+  // Bonus, miniboss, tienda y trato son "salas extra": solo se puede entrar en
+  // ellas desde una sala normal, nunca saltar de una extra a otra.
   function isExtraRoomType(type) {
-    return type === ROOM_BONUS || type === ROOM_MINIBOSS;
+    return type === ROOM_BONUS || type === ROOM_MINIBOSS
+        || type === ROOM_SHOP || type === ROOM_DEAL;
   }
 
   function openPortals() {
@@ -2005,9 +2209,26 @@
     // Mas dificil, mejor probabilidad de mejora (ver RARITY_WEIGHTS_EXTRA):
     // no solo mas enemigos, tambien mas duros de lo que tocaria a este punto.
     if (isBonus) count = Math.round(count * 2.1);
+    // Modificador HORDA: el doble de enemigos (la mitad de vida cada uno la
+    // pone spawnEnemy leyendo currentRoom.mod).
+    if (room.mod === 'horda') count *= 2;
 
     spawnQueue = [];
-    for (let i = 0; i < count; i++) spawnQueue.push(rollEnemyType(isBonus));
+    for (let i = 0; i < count; i++) spawnQueue.push({ type: rollEnemyType(isBonus), affix: null });
+
+    // Elites: a partir de la galaxia 2, uno garantizado por sala normal, mas
+    // alguno extra segun la dificultad. Se marca un enemigo ya encolado.
+    if (galaxy >= 2 && spawnQueue.length) {
+      let elites = 1 + (mapRng() < clamp((difficulty - 6) * 0.05, 0, 0.6) ? 1 : 0);
+      const used = new Set();
+      for (let k = 0; k < elites; k++) {
+        let idx = Math.floor(srand(0, spawnQueue.length));
+        for (let guard = 0; used.has(idx) && guard < 8; guard++) idx = Math.floor(srand(0, spawnQueue.length));
+        used.add(idx);
+        spawnQueue[idx].affix = AFFIX_IDS[Math.floor(srand(0, AFFIX_IDS.length))];
+      }
+    }
+
     spawnQueue.spawnGap = Math.max(0.06, (isBonus ? 0.26 : 0.42) - difficulty * 0.012);
     spawnQueue.timer = 0;
   }
@@ -2028,8 +2249,28 @@
     portals = [];
     galaxyPortal = null;
     spawnQueue = [];
+    pods = [];
+    debris = [];
     portalCooldown = 0.7;
     minibossReinforce = 0;
+    roomHitless = (room.mod === 'reto');
+    roomTimer = (room.mod === 'contrarreloj')
+      ? Math.max(14, 26 - ((galaxy - 1) * 4 + roomsCleared) * 0.4) : 0;
+
+    // Modificador SALA MALDITA: −vida maxima al entrar (una sola vez por sala).
+    if (room.mod === 'maldicion' && !room.cursed) {
+      room.cursed = true;
+      for (const p of [me, ally, ally2]) {
+        if (!p) continue;
+        p.maxHp = Math.max(40, p.maxHp - 12);
+        p.hp = Math.min(p.hp, p.maxHp);
+      }
+    }
+
+    // Aviso al entrar: modificador de sala, o el tipo de sala especial.
+    if (room.type === ROOM_SHOP) showRoomBanner('TIENDA', '#7cf0ff');
+    else if (room.type === ROOM_DEAL) showRoomBanner('SALA DE PACTOS', '#c9a0ff');
+    else if (room.mod && ROOM_MODS[room.mod]) showRoomBanner(ROOM_MODS[room.mod].label, ROOM_MODS[room.mod].color, ROOM_MODS[room.mod].blurb);
 
     // Aparecer por el lado contrario al portal usado, como en Isaac.
     const entry = fromDir
@@ -2046,7 +2287,14 @@
       if (ally) { ally.x = entry.x + 34; ally.y = entry.y; }
     }
 
-    if (room.cleared || room.type === ROOM_START) {
+    if (room.type === ROOM_SHOP || room.type === ROOM_DEAL) {
+      // Nacen limpias: sin oleada, se generan los pods y se abren los portales.
+      room.cleared = true;
+      roomPhase = 'open';
+      if (!room.pods) room.pods = makePods(room.type);
+      pods = room.pods;
+      openPortals();
+    } else if (room.cleared || room.type === ROOM_START) {
       room.cleared = true;
       roomPhase = 'open';
       openPortals();
@@ -2079,6 +2327,75 @@
     updateHud();
   }
 
+  function showRoomBanner(text, color, sub) {
+    roomBanner = { text, sub: sub || '', color: color || '#fff', t: 2.4 };
+  }
+
+  // Genera los pods de una tienda (3, con coste) o de un trato (2 pactos).
+  function makePods(roomType) {
+    const out = [];
+    const g = galaxy, prog = (galaxy - 1) * 4 + roomsCleared;
+    if (roomType === ROOM_SHOP) {
+      const slots = [LOGICAL_W * 0.3, LOGICAL_W * 0.5, LOGICAL_W * 0.7];
+      // Una mejora, una reparacion y, si hay suerte, una habilidad.
+      const kinds = ['upgrade', 'heal', mapRng() < 0.5 ? 'ability' : 'upgrade'];
+      for (let i = 0; i < 3; i++) {
+        const kind = kinds[i];
+        const pod = { x: slots[i], y: LOGICAL_H * 0.42, r: 22, kind, taken: false };
+        if (kind === 'upgrade') {
+          pod.upgrade = pickUpgradeChoices(RARITY_WEIGHTS_EXTRA, 1)[0];
+          pod.cost = 45 + prog * 6 + rarityCost(pod.upgrade.rarity);
+        } else if (kind === 'heal') {
+          pod.cost = 30 + g * 8;
+        } else {
+          pod.ability = ABILITY_TYPES[Math.floor(srand(0, ABILITY_TYPES.length))];
+          pod.cost = 60 + g * 12;
+        }
+        out.push(pod);
+      }
+    } else {
+      // Trato: dos pactos, cada uno mejora fuerte + maldicion. Coger uno cierra el otro.
+      const slots = [LOGICAL_W * 0.36, LOGICAL_W * 0.64];
+      for (let i = 0; i < 2; i++) {
+        const weights = i === 0 ? RARITY_WEIGHTS_EXTRA : [['legendary', 1], ['exotic', 1]];
+        out.push({
+          x: slots[i], y: LOGICAL_H * 0.42, r: 24, kind: 'deal', taken: false, cost: 0,
+          upgrade: pickUpgradeChoices(weights, 1)[0],
+          curse: CURSE_IDS[Math.floor(srand(0, CURSE_IDS.length))],
+        });
+      }
+    }
+    return out;
+  }
+  function rarityCost(r) {
+    return { common: 0, rare: 15, epic: 35, legendary: 70, exotic: 120 }[r] || 0;
+  }
+
+  // Aplica un pod a un jugador (host). Devuelve true si se consumio.
+  function takePod(pod, p) {
+    if (!pod || pod.taken || !p || p.dead) return false;
+    if (pod.kind === 'deal') {
+      if (currentRoom && currentRoom.pods && currentRoom.pods.some(x => x.taken)) return false; // ya se cogio el otro
+      if (pod.upgrade) pod.upgrade.apply(p);
+      const cz = CURSES[pod.curse];
+      if (cz) { cz.apply(p); (p.curses = p.curses || []).push(pod.curse); }
+      pod.taken = true;
+      // El otro pacto se cierra.
+      if (currentRoom && currentRoom.pods) for (const x of currentRoom.pods) if (x !== pod) x.taken = true;
+      sfx('abilityGet');
+      showRoomBanner('PACTO SELLADO', '#c9a0ff', cz ? 'Maldición: ' + cz.label : '');
+      return true;
+    }
+    if (credits < pod.cost) { sfx('hurt'); return false; }
+    credits -= pod.cost;
+    if (pod.kind === 'upgrade' && pod.upgrade) pod.upgrade.apply(p);
+    else if (pod.kind === 'heal') p.hp = clamp(p.hp + Math.round(p.maxHp * 0.6), 0, p.maxHp);
+    else if (pod.kind === 'ability') { p.ability = pod.ability; p.abilityCd = 0; p.shieldSta = SHIELD_MAX; }
+    pod.taken = true;
+    sfx('pickup');
+    return true;
+  }
+
   function onRoomCleared() {
     if (!currentRoom || currentRoom.cleared) return;
 
@@ -2087,9 +2404,21 @@
     roomPhase = 'reward';
     if (currentRole === 'solo') Cloud.bumpRoom();
 
+    // Modificador RETO: si nadie recibio daño, una mejora extra.
+    if (currentRoom.mod === 'reto' && roomHitless) {
+      showRoomBanner('¡SIN UN RASGUÑO!', '#7cf0ff', 'Mejora extra');
+      dropCredits(LOGICAL_W / 2, LOGICAL_H / 2, 40);
+    }
+    // Modificador CONTRARRELOJ: si se limpio a tiempo, botin.
+    if (currentRoom.mod === 'contrarreloj' && roomTimer > 0) {
+      showRoomBanner('¡A TIEMPO!', '#ffd23c', 'Botín');
+      dropCredits(LOGICAL_W / 2, LOGICAL_H / 2, 60 + galaxy * 10);
+      pickups.push({ x: LOGICAL_W / 2, y: LOGICAL_H / 2 - 30, r: 8, life: 12, heal: 35 });
+    }
+
     // Todas las salas dan una mejora; las extra (bonus y miniboss) la dan
     // de mejor calidad en vez de darla por partida doble (ver offerUpgrade).
-    pendingUpgrades = 1;
+    pendingUpgrades = 1 + (currentRoom.mod === 'reto' && roomHitless ? 1 : 0);
     sfx('wave');
     offerUpgrade();
   }
@@ -2125,6 +2454,9 @@
   function nextGalaxy() {
     galaxy++;
     roomsCleared = 0;
+    // Reto diario: re-siembra deterministica por galaxia, asi el piso 2, 3...
+    // tambien sale igual para todos.
+    if (dailyMode) mapRng = makeRng(dailySeed + galaxy);
 
     // Segunda oportunidad: si alguien cayo pero el grupo aguanto hasta
     // llegar aqui (jefe derrotado), revive con media vida al entrar en el
@@ -2149,24 +2481,32 @@
   // limpiada, portales abiertos, sin enemigos ni balas que serializar. Al
   // continuar, apareces en esa sala tal cual, sin re-pelearla.
   function serializeRun() {
-    if (currentRole !== 'solo' || !me || me.dead || gameOverFlag) return null;
+    if (currentRole !== 'solo' || !me || me.dead || gameOverFlag || dailyMode) return null;
     return {
       v: GAME_VERSION,
-      galaxy, roomsCleared, score, level,
+      galaxy, roomsCleared, score, level, credits,
       cell: currentRoom ? [currentRoom.gx, currentRoom.gy] : [0, 0],
       inBossRoom: !!(currentRoom && currentRoom.type === ROOM_BOSS && currentRoom.cleared),
-      map: roomGrid.flat().map(r => r ? r.type + (r.cleared ? 8 : 0) + (r.visited ? 16 : 0) : 0),
+      // Mascara del mapa: tipo en los 4 bits bajos (& 15), +16 limpiada, +32 visitada.
+      map: roomGrid.flat().map(r => r ? r.type + (r.cleared ? 16 : 0) + (r.visited ? 32 : 0) : 0),
+      mods: roomGrid.flat().map(r => (r && r.mod) ? ROOM_MOD_IDS.indexOf(r.mod) + 1 : 0),
       player: {
         maxHp: me.maxHp, hp: me.hp, speed: me.speed, fireRate: me.fireRate,
         dmg: me.dmg, shotCount: me.shotCount, spread: me.spread, pierce: me.pierce,
         bulletSpeed: me.bulletSpeed, bulletLife: me.bulletLife, ability: me.ability,
+        drones: me.drones || 0, chargeShot: !!me.chargeShot, ricochet: !!me.ricochet,
+        backshot: !!me.backshot, curses: me.curses || [],
       },
-      identity: { name: me.name, skin: mySkin, projectile: myProjectile },
+      identity: { name: me.name, skin: mySkin, projectile: myProjectile, ship: myShip },
       savedAt: Date.now(),
     };
   }
   function checkpointSave() {
-    if (currentRole !== 'solo') return;
+    if (currentRole !== 'solo' || dailyMode) return;
+    // No se guarda dentro de una tienda/trato a medias: el checkpoint anterior
+    // (sala normal ya limpiada) sigue valiendo y evita estados raros de "pods".
+    if (currentRoom && isExtraRoomType(currentRoom.type)
+        && (currentRoom.type === ROOM_SHOP || currentRoom.type === ROOM_DEAL)) return;
     const run = serializeRun();
     if (run) Cloud.setSavedRun(run);
   }
@@ -2180,11 +2520,16 @@
       me.hp = clamp(me.hp, 1, me.maxHp);
     }
     ally = null; ally2 = null;
+    dailyMode = false; mapRng = Math.random;
     bullets = []; enemies = []; particles = []; pickups = [];
     boss = null; shockwaves = []; beams = []; meteors = []; spawnQueue = [];
+    pods = []; debris = []; roomBanner = null; roomHitless = false; roomTimer = 0;
+    // Maldiciones "plaga" acumuladas en la partida guardada.
+    curseEnemyHp = ((run.player && run.player.curses) || []).filter(c => c === 'plaga').length * 0.12;
     gameOverFlag = false; clientGameOverShown = false;
     levelUpState = null;
     score = run.score || 0;
+    credits = run.credits || 0;
     level = run.level || 0;
     galaxy = run.galaxy || 1;
     roomsCleared = run.roomsCleared || 0;
@@ -2200,7 +2545,11 @@
       Array.from({ length: GRID }, (_, gx) => {
         const code = (run.map && run.map[gy * GRID + gx]) || 0;
         if (!code) return null;
-        return { gx, gy, type: code & 7, cleared: (code & 8) !== 0, visited: (code & 16) !== 0 };
+        const mid = run.mods ? run.mods[gy * GRID + gx] : 0;
+        return {
+          gx, gy, type: code & 15, cleared: (code & 16) !== 0, visited: (code & 32) !== 0,
+          mod: mid ? ROOM_MOD_IDS[mid - 1] : null,
+        };
       }));
     const cell = run.cell || [0, 0];
     currentRoom = roomAt(cell[0], cell[1]) || roomGrid.flat().find(Boolean);
@@ -2243,7 +2592,7 @@
   }
 
   function makePlayer(x, y, info) {
-    return {
+    const p = {
       x, y, r: 14, speed: 260, hp: 100, maxHp: 100,
       fireRate: 0.14, dmg: 10, shotCount: 1, spread: 0.14, pierce: 0, bulletSpeed: 640, bulletLife: 1.2,
       shootCooldown: 0, aim: 0, dead: false,
@@ -2251,11 +2600,22 @@
       projectile: PROJECTILE_MAP[info.projectile] ? info.projectile : 'bolt',
       ability: null, abilityCd: 0,       // habilidad dropeada por el jefe (tecla E)
       shieldOn: false, shieldSta: SHIELD_MAX, laserCharge: 0,
+      // Transformaciones (mejoras exoticas): ver UPGRADE_POOL / updateDrones.
+      drones: 0, chargeShot: false, chargeT: 0, ricochet: false, backshot: false,
+      droneAng: 0, curses: [],
+      // Nave elegida: aplica sus overrides encima de los valores de arriba.
+      ship: SHIP_MAP[info.ship] ? info.ship : DEFAULT_SHIP,
+      noShootTimer: 0, // tiempo desde el ultimo disparo (pasivo "regen")
     };
+    const ship = SHIP_MAP[p.ship];
+    if (ship && ship.base) Object.assign(p, ship.base);
+    p.passive = ship ? ship.passive : null;
+    return p;
   }
 
   function resetGame(role, meInfo, allyInf, allyInf2) {
     currentRole = role;
+    if (role !== 'solo') dailyMode = false; // el reto diario es solo-jugador
     spectatorPanel.classList.toggle('hidden', role !== 'spectator');
     if (role === 'host' && allyInf) {
       me = makePlayer(LOGICAL_W / 2 - (allyInf2 ? 60 : 40), LOGICAL_H / 2, meInfo);
@@ -2281,6 +2641,13 @@
     beams = [];
     meteors = [];
     score = 0;
+    credits = 0;
+    pods = [];
+    debris = [];
+    curseEnemyHp = 0;
+    roomBanner = null;
+    roomHitless = false;
+    roomTimer = 0;
     spawnQueue = [];
     gameOverFlag = false;
     level = 0;
@@ -2297,6 +2664,10 @@
     galaxyPortal = null;
     pendingUpgrades = 0;
     if (role === 'host' || role === 'solo') {
+      // Reto diario: solo en solitario. Siembra el generador del piso con la
+      // fecha de hoy antes de crear el primer piso.
+      if (dailyMode && role === 'solo') { dailySeed = seedFromDate(); mapRng = makeRng(dailySeed + 1); }
+      else { mapRng = Math.random; }
       const start = generateMap();
       enterRoom(start, null);
     } else {
@@ -2312,6 +2683,7 @@
 
   function updateHud() {
     scoreEl.textContent = score;
+    creditsEl.textContent = credits;
     galaxyEl.textContent = galaxy;
     roomsEl.textContent = roomsCleared;
     levelEl.textContent = level;
@@ -2483,7 +2855,7 @@
     // En sala bonus se tira como si se llevara mas piso avanzado: entran
     // antes los tipos duros y salen mas a menudo.
     const progress = (galaxy - 1) * 5 + roomsCleared + (isBonus ? 6 : 0);
-    const roll = Math.random();
+    const roll = mapRng(); // secuencia de tipos: determinista en el reto diario
     let acc = 0;
     const table = [
       { type: 'sniper',   chance: progress >= 6 ? 0.10 : 0 },
@@ -3208,14 +3580,14 @@
   }
 
   function fireChargedLaser(p) {
-    const dps = Math.max(60, p.dmg * 12);   // sube con el daño de la nave
+    const dps = Math.max(60, p.dmg * 12) * themeAbilityDmgMul();
     const fireTimer = 0.55;
     beams.push({
       x: p.x, y: p.y, angle: p.aim,
       width: 18, life: fireTimer, maxLife: fireTimer,
       color: ABILITY_META.laser.color, owner: 'player', dmg: dps,
     });
-    p.abilityCd = ABILITY_COOLDOWN.laser;
+    p.abilityCd = ABILITY_COOLDOWN.laser * themeAbilityCdMul();
     sfx('laserFire');
   }
 
@@ -3243,7 +3615,7 @@
     }
 
     if (p.ability === 'meteor') {
-      p.abilityCd = ABILITY_COOLDOWN.meteor;
+      p.abilityCd = ABILITY_COOLDOWN.meteor * themeAbilityCdMul();
       let tx = (p === me) ? mouse.x : (input && input.aimX);
       let ty = (p === me) ? mouse.y : (input && input.aimY);
       if (typeof tx !== 'number') { tx = p.x + Math.cos(p.aim) * 260; ty = p.y + Math.sin(p.aim) * 260; }
@@ -3251,7 +3623,7 @@
       meteors.push({
         x: clamp(tx, 40, LOGICAL_W - 40),
         y: clamp(ty, 40, LOGICAL_H - 40),
-        radius: 140, dmg: Math.max(40, p.dmg * 6), warn, maxWarn: warn, exploded: false,
+        radius: 140, dmg: Math.max(40, p.dmg * 6) * themeAbilityDmgMul(), warn, maxWarn: warn, exploded: false,
         color: ABILITY_META.meteor.color, owner: 'player',
       });
       sfx('meteor');
@@ -3284,6 +3656,9 @@
   }
 
   function spawnEnemy(type, atX, atY) {
+    // El primer argumento puede ser un string o {type, affix} (cola de sala).
+    let affix = null;
+    if (type && typeof type === 'object') { affix = type.affix || null; type = type.type; }
     const side = Math.floor(rand(0, 4));
     let x, y;
     const margin = 40;
@@ -3314,23 +3689,33 @@
     }[type];
 
     const scale = 1 + ((galaxy - 1) * 4 + roomsCleared) * 0.09;
-    const hp = base.hp * scale * coopHpScale();
+    const isElite = !!(affix && AFFIX_META[affix]);
+    // HORDA: mitad de vida por enemigo (el doble de enemigos lo pone
+    // spawnRoomEnemies). Maldicion "plaga": +vida a todos.
+    const hordaMul = (currentRoom && currentRoom.mod === 'horda') ? 0.5 : 1;
+    let hp = base.hp * scale * coopHpScale() * hordaMul * (1 + curseEnemyHp);
+    if (isElite) hp *= 2.4;
+    let speed = base.speed * (1 + ((galaxy - 1) * 4 + roomsCleared) * 0.03);
+    if (affix === 'veloz') speed *= 1.6;
     enemies.push({
       id: nextEnemyId++,
       x, y, type,
-      r: base.r,
-      speed: base.speed * (1 + ((galaxy - 1) * 4 + roomsCleared) * 0.03),
+      r: base.r + (isElite ? 3 : 0),
+      speed,
       hp, maxHp: hp,
       entered: placed, // si se coloca a mano (panel de pruebas) ya nace "dentro"
-      dmg: base.dmg,
+      dmg: base.dmg * (isElite ? 1.3 : 1),
       color: base.color,
-      scoreVal: base.score,
+      scoreVal: base.score * (isElite ? 3 : 1),
       ranged: !!base.ranged,
       sniper: !!base.sniper,
       explodes: !!base.explodes,
       kamikaze: !!base.kamikaze,
       splits: !!base.splits,
       fireCd: rand(0.5, 1.5),
+      affix: isElite ? affix : null,
+      armor: affix === 'blindado' ? 3 : 0,       // impactos que absorbe
+      healCd: 0, summonCd: rand(2, 4),           // temporizadores de sanador / invocador
     });
   }
 
@@ -3429,22 +3814,55 @@
   function tryShoot(p, input, dt) {
     p.shootCooldown -= dt;
     if (p.shieldOn || p.laserCharge > 0) return; // con escudo o cargando laser no se dispara
+
+    const style = PROJECTILE_MAP[p.projectile] || PROJECTILE_MAP.bolt;
+    const life = p.bulletLife * themeBulletLifeMul();
+    const oneShot = (adminOneShot && p === me);
+
+    // Transformacion "disparo de carga": mantener carga; soltar lanza un tiro
+    // gordo (mucho daño, radio y perforacion) y no dispara normal mientras carga.
+    if (p.chargeShot) {
+      if (input.shooting) {
+        p.chargeT = Math.min(1.4, (p.chargeT || 0) + dt);
+        p.noShootTimer = 0;
+        return;
+      }
+      if (p.chargeT > 0.25) {
+        const pow = clamp(p.chargeT / 1.4, 0.18, 1);
+        const a = input.aimAngle;
+        bullets.push({
+          x: p.x + Math.cos(a) * (p.r + 8), y: p.y + Math.sin(a) * (p.r + 8),
+          vx: Math.cos(a) * (p.bulletSpeed * 1.15), vy: Math.sin(a) * (p.bulletSpeed * 1.15),
+          r: style.r + 6 + pow * 10, life: life + 0.4, friendly: true,
+          dmg: oneShot ? 999999 : p.dmg * (2 + pow * 6),
+          pierce: p.pierce + 3 + Math.round(pow * 3), style: p.projectile,
+          bounces: p.ricochet ? 1 : 0,
+        });
+        sfx('laserFire');
+      }
+      p.chargeT = 0;
+      return;
+    }
+
     if (!input.shooting || p.shootCooldown > 0) return;
     p.shootCooldown = p.fireRate;
-    const style = PROJECTILE_MAP[p.projectile] || PROJECTILE_MAP.bolt;
+    p.noShootTimer = 0;
     const count = p.shotCount;
     const startAngle = input.aimAngle - p.spread * (count - 1) / 2;
     sfx('shoot', p.projectile);
-    for (let i = 0; i < count; i++) {
-      const a = startAngle + p.spread * i;
+    const shots = [];
+    for (let i = 0; i < count; i++) shots.push(startAngle + p.spread * i);
+    if (p.backshot) shots.push(input.aimAngle + Math.PI); // transformacion: tiro trasero
+    for (const a of shots) {
       bullets.push({
         x: p.x + Math.cos(a) * (p.r + 6),
         y: p.y + Math.sin(a) * (p.r + 6),
         vx: Math.cos(a) * p.bulletSpeed,
         vy: Math.sin(a) * p.bulletSpeed,
-        r: style.r, life: p.bulletLife, friendly: true,
-        dmg: (adminOneShot && p === me) ? 999999 : p.dmg,
+        r: style.r, life, friendly: true,
+        dmg: oneShot ? 999999 : p.dmg,
         pierce: p.pierce, style: p.projectile,
+        bounces: p.ricochet ? 1 : 0,
       });
     }
   }
@@ -3453,6 +3871,8 @@
     if (p.dead) return;
     if (adminGod && p === me) return; // modo dios del panel de pruebas
     p.hp -= amount;
+    p.noShootTimer = 0;        // recibir daño cuenta como "estar en combate"
+    roomHitless = false;       // sala "reto": ya no cuenta como perfecta
     sfx('hurt');
     if (p.hp <= 0) { p.hp = 0; p.dead = true; }
   }
@@ -3504,6 +3924,7 @@
       const abilityType = ABILITY_TYPES[Math.floor(Math.random() * ABILITY_TYPES.length)];
       pickups.push({ x: boss.x, y: boss.y, r: 10, life: 20, ability: abilityType });
     }
+    dropCredits(boss.x, boss.y, 120 + galaxy * 30); // pellizco gordo para la tienda
     boss = null;
     beams.length = 0;
     meteors.length = 0;
@@ -3515,12 +3936,36 @@
   // desde las balas del jugador como desde sus habilidades.
   function killEnemy(e) {
     score += e.scoreVal;
-    spawnParticles(e.x, e.y, e.color, 14);
+    spawnParticles(e.x, e.y, e.color, e.affix ? 22 : 14);
     spawnPickup(e.x, e.y);
+    dropCredits(e.x, e.y, e.type === 'miniboss' ? 80 + galaxy * 15 : creditValue(e.scoreVal, !!e.affix));
     if (e.explodes) explodeBomber(e); else sfx('enemyDie');
     if (e.splits) spawnSplitterBabies(e);
+    // Afijo explosivo: al morir suelta un anillo de metralla como el bomber.
+    if (e.affix === 'explosivo') explodeBomber(e);
     const idx = enemies.indexOf(e);
     if (idx !== -1) enemies.splice(idx, 1);
+  }
+
+  // ---------- creditos (moneda del equipo) ----------
+  function creditValue(scoreVal, elite) {
+    const base = Math.max(1, Math.round(scoreVal * 0.25));
+    return elite ? base * 4 : base;
+  }
+  // Suelta la cantidad como una moneda (o varias si es mucho). El cliente solo
+  // ve caer la moneda; el recuento real lo lleva el anfitrion.
+  function dropCredits(x, y, amount) {
+    if (amount <= 0) return;
+    let left = amount, guard = 0;
+    while (left > 0 && guard++ < 6) {
+      const chunk = left > 40 ? Math.ceil(left / 3) : left;
+      left -= chunk;
+      pickups.push({
+        x: clamp(x + rand(-16, 16), 12, canvas.width - 12),
+        y: clamp(y + rand(-16, 16), 12, canvas.height - 12),
+        r: 7, life: 14, credits: chunk,
+      });
+    }
   }
 
   // El escudo solo cubre un arco delante de hacia donde apunta el jugador
@@ -3532,6 +3977,96 @@
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
     return Math.abs(diff) < SHIELD_HALF_ANGLE;
+  }
+
+  // Reglas globales del tema de galaxia (solo host). El fondo es puramente
+  // visual y se pinta en draw(); aqui van las que afectan a la simulacion.
+  let debrisTimer = 0;
+  function updateThemeRules(dt, activePlayers) {
+    const rule = galaxyTheme().rule;
+
+    // Campo de asteroides: rocas que cruzan la pantalla y dañan al contacto.
+    if (rule === 'asteroides') {
+      debrisTimer -= dt;
+      if (debrisTimer <= 0 && debris.length < 6) {
+        debrisTimer = rand(1.4, 3.0);
+        const vert = Math.random() < 0.5;
+        const r = rand(14, 26);
+        debris.push(vert
+          ? { x: rand(60, canvas.width - 60), y: -r - 10, vx: rand(-30, 30), vy: rand(70, 130), r }
+          : { x: -r - 10, y: rand(60, canvas.height - 60), vx: rand(80, 150), vy: rand(-30, 30), r });
+      }
+    } else if (debris.length && rule !== 'asteroides') {
+      debris.length = 0;
+    }
+    for (let i = debris.length - 1; i >= 0; i--) {
+      const d = debris[i];
+      d.x += d.vx * dt; d.y += d.vy * dt;
+      if (d.x < -60 || d.x > canvas.width + 60 || d.y < -60 || d.y > canvas.height + 60) { debris.splice(i, 1); continue; }
+      for (const p of activePlayers) {
+        if (p.dead) continue;
+        if (dist(d.x, d.y, p.x, p.y) < d.r + p.r && !inShieldArc(p, d.x, d.y)) {
+          damagePlayer(p, 26 * dt * 2.5);
+        }
+      }
+    }
+  }
+  // Multiplicadores que aplican algunos temas (leidos donde toca).
+  function themeAbilityCdMul() { return galaxyTheme().rule === 'ionica' ? 1.4 : 1; }
+  function themeAbilityDmgMul() { return galaxyTheme().rule === 'ionica' ? 1.5 : 1; }
+  function themeBulletLifeMul() { return galaxyTheme().rule === 'gravedad' ? 1.2 : 1; }
+
+  function applyShipPassive(p, dt) {
+    if (p.passive === 'regen') {
+      p.noShootTimer = (p.noShootTimer || 0) + dt;
+      if (p.noShootTimer > 2.5 && p.hp < p.maxHp) p.hp = Math.min(p.maxHp, p.hp + 7 * dt);
+    }
+    // 'glass' (Aguja): el +daño ya va en los stats base; sin tick.
+  }
+
+  // Drones orbitando: disparan solos al enemigo mas cercano. El cliente los
+  // dibuja derivando el angulo de performance.now(), no viajan por red.
+  function updateDrones(p, dt) {
+    if (!p.drones) return;
+    p.droneAng = (p.droneAng || 0) + dt * 2.2;
+    p.droneCd = (p.droneCd || 0) - dt;
+    if (p.droneCd <= 0) {
+      const tgt = nearestEnemyTarget(p.x, p.y);
+      if (tgt) {
+        p.droneCd = 0.5;
+        for (let i = 0; i < p.drones; i++) {
+          const a = p.droneAng + i * (Math.PI * 2 / p.drones);
+          const dx = p.x + Math.cos(a) * 34, dy = p.y + Math.sin(a) * 34;
+          const ta = Math.atan2(tgt.y - dy, tgt.x - dx);
+          bullets.push({
+            x: dx, y: dy, vx: Math.cos(ta) * 720, vy: Math.sin(ta) * 720,
+            r: 3, life: 1.1, friendly: true, dmg: Math.max(4, p.dmg * 0.5),
+            pierce: 0, style: p.projectile,
+          });
+        }
+      } else {
+        p.droneCd = 0.2;
+      }
+    }
+  }
+
+  // Interaccion con los pods de tienda / trato (solo host). Cada pod tiene un
+  // "cooldown" tras un intento fallido (sin creditos) para no spamear el sfx.
+  function updatePods(activePlayers, dt) {
+    for (const pod of pods) {
+      pod._cd = Math.max(0, (pod._cd || 0) - dt);
+      if (pod.taken) continue;
+      let over = false;
+      for (const p of activePlayers) {
+        if (p.dead) continue;
+        if (dist(pod.x, pod.y, p.x, p.y) < pod.r + p.r) {
+          over = true;
+          if (pod._cd <= 0) { pod._cd = 0.8; takePod(pod, p); }
+          break;
+        }
+      }
+      if (!over && pod._cd < 0.8) pod._cd = 0;
+    }
   }
 
   // ---------- host/solo simulation ----------
@@ -3571,6 +4106,14 @@
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.life -= dt;
+      // Transformacion "rebote": las balas amigas rebotan en la pared una vez
+      // en vez de desaparecer.
+      if (b.friendly && b.bounces > 0 && b.life > 0) {
+        if (b.x < b.r) { b.x = b.r; b.vx = Math.abs(b.vx); b.bounces--; }
+        else if (b.x > canvas.width - b.r) { b.x = canvas.width - b.r; b.vx = -Math.abs(b.vx); b.bounces--; }
+        if (b.y < b.r) { b.y = b.r; b.vy = Math.abs(b.vy); b.bounces--; }
+        else if (b.y > canvas.height - b.r) { b.y = canvas.height - b.r; b.vy = -Math.abs(b.vy); b.bounces--; }
+      }
       const offscreen = b.x < -20 || b.x > canvas.width + 20 || b.y < -20 || b.y > canvas.height + 20;
       if (b.life <= 0 || offscreen) {
         // Los orbes del megaOrb estallan en bolitas al agotarse su fusible
@@ -3608,12 +4151,24 @@
 
     updatePortals(dt, activePlayers);
 
+    // Modificador CONTRARRELOJ: cuenta atras mientras se pelea.
+    if (currentRoom && currentRoom.mod === 'contrarreloj' && roomPhase === 'fight' && roomTimer > 0) {
+      roomTimer = Math.max(0, roomTimer - dt);
+    }
+
     // jefe
     updateBoss(dt, activePlayers);
     updatePlayerAbilities(dt, activePlayers);
     updateBeams(dt, activePlayers);
     updateMeteors(dt, activePlayers);
     updateShockwaves(dt);
+    updateThemeRules(dt, activePlayers);
+    for (const p of activePlayers) {
+      if (p.dead) continue;
+      applyShipPassive(p, dt);
+      updateDrones(p, dt);
+    }
+    updatePods(activePlayers, dt);
 
     // enemies
     for (let i = enemies.length - 1; i >= 0; i--) {
@@ -3660,6 +4215,27 @@
         // una vez dentro, no puede volver a salir
         e.x = clamp(e.x, e.r, canvas.width - e.r);
         e.y = clamp(e.y, e.r, canvas.height - e.r);
+
+        // Afijos activos (elites). El resto (veloz, blindado, explosivo) son
+        // pasivos y se resuelven en spawnEnemy / al recibir daño / al morir.
+        if (e.affix === 'sanador') {
+          e.healCd -= dt;
+          if (e.healCd <= 0) {
+            e.healCd = 1.6;
+            for (const o of enemies) {
+              if (o === e || o.type === 'miniboss') continue;
+              if (dist(o.x, o.y, e.x, e.y) < 150) o.hp = Math.min(o.maxHp, o.hp + o.maxHp * 0.12);
+            }
+            spawnParticles(e.x, e.y, AFFIX_META.sanador.aura, 6);
+          }
+        } else if (e.affix === 'invocador') {
+          e.summonCd -= dt;
+          if (e.summonCd <= 0 && enemies.length < 40) {
+            e.summonCd = 5;
+            spawnEnemy('grunt');
+            spawnParticles(e.x, e.y, AFFIX_META.invocador.aura, 8);
+          }
+        }
       }
 
       // Escudo del jugador: retiene a los enemigos que chocan de frente y les
@@ -3709,9 +4285,16 @@
         const b = bullets[j];
         if (!b.friendly) continue;
         if (dist(b.x, b.y, e.x, e.y) < e.r + b.r) {
-          e.hp -= b.dmg;
-          spawnParticles(b.x, b.y, e.color, 4);
-          sfx('hit');
+          // Afijo blindado: absorbe los primeros impactos sin recibir daño.
+          if (e.armor > 0) {
+            e.armor--;
+            spawnParticles(b.x, b.y, AFFIX_META.blindado.aura, 5);
+            sfx('shieldBlock');
+          } else {
+            e.hp -= b.dmg;
+            spawnParticles(b.x, b.y, e.color, 4);
+            sfx('hit');
+          }
           if (b.pierce > 0) b.pierce--; else bullets.splice(j, 1);
           if (e.hp <= 0) killEnemy(e);
           break;
@@ -3762,7 +4345,10 @@
         if (p.dead) continue;
         if (dist(pk.x, pk.y, p.x, p.y) < pk.r + p.r) {
           // No se acumulan: coger una habilidad nueva pisa la que ya tenias.
-          if (pk.ability) {
+          if (pk.credits) {
+            credits += pk.credits;
+            sfx('pickup');
+          } else if (pk.ability) {
             p.ability = pk.ability;
             p.abilityCd = 0;
             p.shieldOn = false; p.shieldSta = SHIELD_MAX; p.laserCharge = 0;
@@ -3807,22 +4393,37 @@
   const r1 = v => Math.round(v);
   const r2 = v => Math.round(v * 100) / 100;
 
+  // Una nave para el snapshot. Se anaden aqui los campos nuevos (habilidades,
+  // transformaciones, nave) para no repetirlos tres veces.
+  function netPlayer(p) {
+    return {
+      x: r1(p.x), y: r1(p.y), hp: r1(p.hp), maxHp: p.maxHp, aim: r2(p.aim), dead: p.dead,
+      name: p.name, color: p.color, speed: r1(p.speed), r: p.r,
+      ability: p.ability, abilityCd: r2(p.abilityCd), shieldOn: p.shieldOn,
+      shieldSta: r1(p.shieldSta), laserCharge: r2(p.laserCharge),
+      drones: p.drones || 0, chargeShot: !!p.chargeShot, chargeT: r2(p.chargeT || 0),
+      ricochet: !!p.ricochet, backshot: !!p.backshot, ship: p.ship || 'vanguard',
+    };
+  }
+
   function buildSnapshot() {
     const paquete = {
       t: 'state',
       // Se manda tambien la velocidad para que el cliente pueda predecir su
       // propio movimiento sin esperar al host.
-      me: { x: r1(me.x), y: r1(me.y), hp: r1(me.hp), maxHp: me.maxHp, aim: r2(me.aim), dead: me.dead, name: me.name, color: me.color, speed: r1(me.speed), r: me.r, ability: me.ability, abilityCd: r2(me.abilityCd), shieldOn: me.shieldOn, shieldSta: r1(me.shieldSta), laserCharge: r2(me.laserCharge) },
-      ally: ally ? { x: r1(ally.x), y: r1(ally.y), hp: r1(ally.hp), maxHp: ally.maxHp, aim: r2(ally.aim), dead: ally.dead, name: ally.name, color: ally.color, speed: r1(ally.speed), r: ally.r, ability: ally.ability, abilityCd: r2(ally.abilityCd), shieldOn: ally.shieldOn, shieldSta: r1(ally.shieldSta), laserCharge: r2(ally.laserCharge) } : null,
-      ally2: ally2 ? { x: r1(ally2.x), y: r1(ally2.y), hp: r1(ally2.hp), maxHp: ally2.maxHp, aim: r2(ally2.aim), dead: ally2.dead, name: ally2.name, color: ally2.color, speed: r1(ally2.speed), r: ally2.r, ability: ally2.ability, abilityCd: r2(ally2.abilityCd), shieldOn: ally2.shieldOn, shieldSta: r1(ally2.shieldSta), laserCharge: r2(ally2.laserCharge) } : null,
+      me: netPlayer(me),
+      ally: ally ? netPlayer(ally) : null,
+      ally2: ally2 ? netPlayer(ally2) : null,
       // Arrays planos de numeros en vez de objetos: un objeto repite el nombre
       // de cada campo por cada elemento ("x","y","r","friendly","style"...),
       // lo que con cientos de balas multiplica el tamano del paquete.
-      // Enemigo: [id, x, y, r, hp, maxHp, indiceColor, telegraph]
+      // Enemigo: [id, x, y, r, hp, maxHp, indiceColor, telegraph, afijo]
+      // (afijo: 0 = ninguno, si no AFFIX_IDS.indexOf(...)+1). Stride 9.
       en: enemies.flatMap(e => [
         e.id, r1(e.x), r1(e.y), e.r, r1(e.hp), r1(e.maxHp),
         NET_COLOR_INDEX[e.color] !== undefined ? NET_COLOR_INDEX[e.color] : 0,
         r2(e.telegraph || 0),
+        e.affix ? AFFIX_IDS.indexOf(e.affix) + 1 : 0,
       ]),
       // Bala: [x, y, vx, vy, r, estilo]  (estilo -1 = bala enemiga normal;
       // -2 o menos = bala enemiga con color propio, indexado en NET_COLORS:
@@ -3833,7 +4434,13 @@
         else if (b.color !== undefined && NET_COLOR_INDEX[b.color] !== undefined) style = -(2 + NET_COLOR_INDEX[b.color]);
         return [r1(b.x), r1(b.y), r1(b.vx), r1(b.vy), b.r, style];
       }),
-      pickups: pickups.map(p => ({ x: r1(p.x), y: r1(p.y), r: p.r, life: r2(p.life), ability: p.ability })),
+      pickups: pickups.map(p => ({ x: r1(p.x), y: r1(p.y), r: p.r, life: r2(p.life), ability: p.ability, credits: p.credits || 0 })),
+      // Pods de tienda / trato: [x, y, r, kind, cost, taken]  +  etiquetas aparte
+      pods: pods.flatMap(p => [r1(p.x), r1(p.y), p.r, POD_KIND_IDS.indexOf(p.kind), p.cost | 0, p.taken ? 1 : 0]),
+      pl: pods.map(p => p.upgrade ? p.upgrade.name : (p.ability || '')),
+      // Asteroides del tema de galaxia: [x, y, r]
+      deb: debris.flatMap(d => [r1(d.x), r1(d.y), d.r]),
+      credits,
       boss: boss ? {
         x: r1(boss.x), y: r1(boss.y), r: boss.r,
         hp: r1(boss.hp), maxHp: r1(boss.maxHp),
@@ -3857,9 +4464,12 @@
       meteors: meteors.map(m => ({
         x: r1(m.x), y: r1(m.y), radius: m.radius, warn: r2(m.warn), maxWarn: m.maxWarn, color: m.color,
       })),
-      // Mapa comprimido: un numero por celda (tipo + banderas).
+      // Mapa comprimido: un numero por celda. Tipo en los 4 bits bajos (& 15),
+      // +16 limpiada, +32 visitada. "mods" es un array paralelo con el id del
+      // modificador de cada celda (0 = ninguno).
       map: roomGrid.flat().map(r =>
-        r ? r.type + (r.cleared ? 8 : 0) + (r.visited ? 16 : 0) : 0),
+        r ? r.type + (r.cleared ? 16 : 0) + (r.visited ? 32 : 0) : 0),
+      mods: roomGrid.flat().map(r => (r && r.mod) ? ROOM_MOD_IDS.indexOf(r.mod) + 1 : 0),
       cur: currentRoom ? [currentRoom.gx, currentRoom.gy] : null,
       // Portal: [x, y, r, tipoSala, limpiada]
       po: portals.flatMap(p => [r1(p.x), r1(p.y), p.r, p.type, p.cleared ? 1 : 0]),
@@ -4019,6 +4629,12 @@
         me.shieldOn = hostMe.shieldOn;
         me.shieldSta = hostMe.shieldSta;
         me.laserCharge = hostMe.laserCharge;
+        me.drones = hostMe.drones;
+        me.chargeShot = hostMe.chargeShot;
+        me.chargeT = hostMe.chargeT;
+        me.ricochet = hostMe.ricochet;
+        me.backshot = hostMe.backshot;
+        me.ship = hostMe.ship;
       }
     }
 
@@ -4052,7 +4668,7 @@
     if (s.en) {
       const previous = new Map(enemies.map(e => [e.id, e]));
       const rebuilt = [];
-      for (let i = 0; i < s.en.length; i += 8) {
+      for (let i = 0; i < s.en.length; i += 9) {
         const id = s.en[i];
         const existing = previous.get(id);
         const enemy = existing || { id, x: s.en[i + 1], y: s.en[i + 2] };
@@ -4063,6 +4679,7 @@
         enemy.maxHp = s.en[i + 5];
         enemy.color = NET_COLORS[s.en[i + 6]] || NET_COLORS[0];
         enemy.telegraph = s.en[i + 7];
+        enemy.affix = AFFIX_IDS[s.en[i + 8] - 1] || null;
         rebuilt.push(enemy);
       }
       enemies = rebuilt;
@@ -4089,6 +4706,30 @@
     }
 
     pickups = s.pickups;
+    credits = s.credits || 0;
+
+    // Pods de tienda / trato: [x, y, r, kind, cost, taken]
+    pods = [];
+    if (s.pods) {
+      for (let i = 0; i < s.pods.length; i += 6) {
+        const idx = i / 6;
+        const kind = POD_KIND_IDS[s.pods[i + 3]] || 'upgrade';
+        const lbl = s.pl && s.pl[idx];
+        pods.push({
+          x: s.pods[i], y: s.pods[i + 1], r: s.pods[i + 2],
+          kind, cost: s.pods[i + 4], taken: s.pods[i + 5] === 1,
+          upgrade: (lbl && (kind === 'upgrade' || kind === 'deal')) ? { name: lbl } : null,
+          ability: (lbl && kind === 'ability') ? lbl : undefined,
+        });
+      }
+    }
+    // Asteroides del tema: [x, y, r]
+    debris = [];
+    if (s.deb) {
+      for (let i = 0; i < s.deb.length; i += 3) {
+        debris.push({ x: s.deb[i], y: s.deb[i + 1], r: s.deb[i + 2] });
+      }
+    }
 
     // ---- Jefe: tambien se desliza en vez de saltar ----
     if (s.boss) {
@@ -4111,22 +4752,38 @@
     score = s.score; level = s.level; galaxy = s.galaxy; roomsCleared = s.roomsCleared;
 
     // ---- Mapa de salas, portales y minimapa: manda el anfitrion ----
-    // El mapa viaja comprimido a un numero por celda: tipo en los 3 bits
-    // bajos, +8 si esta limpiada y +16 si ya se ha visitado.
+    // El mapa viaja comprimido a un numero por celda: tipo en los 4 bits
+    // bajos (& 15), +16 si esta limpiada y +32 si ya se ha visitado. "mods" es
+    // un array paralelo con el id del modificador de cada celda.
     if (s.map) {
       roomGrid = Array.from({ length: GRID }, (_, gy) =>
         Array.from({ length: GRID }, (_, gx) => {
           const code = s.map[gy * GRID + gx];
           if (!code) return null;
+          const mid = s.mods ? s.mods[gy * GRID + gx] : 0;
           return {
             gx, gy,
-            type: code & 7,
-            cleared: (code & 8) !== 0,
-            visited: (code & 16) !== 0,
+            type: code & 15,
+            cleared: (code & 16) !== 0,
+            visited: (code & 32) !== 0,
+            mod: mid ? ROOM_MOD_IDS[mid - 1] : null,
           };
         }));
     }
     currentRoom = s.cur ? roomAt(s.cur[0], s.cur[1]) : null;
+
+    // Aviso de sala en el cliente: se dispara al detectar cambio de sala
+    // (no viaja por red, se deriva del mapa que ya llega).
+    const rk = currentRoom ? currentRoom.gx + ',' + currentRoom.gy + '@' + galaxy : '';
+    if (rk && rk !== lastBannerRoomKey) {
+      lastBannerRoomKey = rk;
+      if (currentRoom.type === ROOM_SHOP) showRoomBanner('TIENDA', '#7cf0ff');
+      else if (currentRoom.type === ROOM_DEAL) showRoomBanner('SALA DE PACTOS', '#c9a0ff');
+      else if (currentRoom.mod && ROOM_MODS[currentRoom.mod]) {
+        const m = ROOM_MODS[currentRoom.mod];
+        showRoomBanner(m.label, m.color, m.blurb);
+      }
+    }
 
     // Portal: [x, y, r, tipoSala, limpiada]
     portals = [];
@@ -4333,14 +4990,63 @@
     ctx.restore();
   }
 
+  // Fondo del tema de galaxia: degradado + campo de estrellas parallax. Solo
+  // estetico; se regenera bgStars al cambiar de galaxia.
+  let bgStars = [], bgStarsGalaxy = -1;
+  function drawBackground() {
+    const th = galaxyTheme();
+    if (bgStarsGalaxy !== galaxy) {
+      bgStarsGalaxy = galaxy;
+      bgStars = [];
+      for (let i = 0; i < 90; i++) bgStars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, s: Math.random() * 1.8 + 0.4, d: Math.random() * 0.5 + 0.2 });
+    }
+    const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    g.addColorStop(0, th.bg[0]); g.addColorStop(1, th.bg[1]);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const t = performance.now() / 1000;
+    ctx.fillStyle = th.star;
+    for (const st of bgStars) {
+      const y = (st.y + t * st.d * 18) % canvas.height;
+      ctx.globalAlpha = 0.25 + st.d;
+      ctx.beginPath(); ctx.arc(st.x, y, st.s, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawBackground();
     drawGrid();
+
+    // Asteroides del tema.
+    for (const d of debris) {
+      ctx.save();
+      ctx.fillStyle = '#5b4a38';
+      ctx.strokeStyle = '#8a7350';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 6;
+      ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+
+    drawPods();
 
     for (const pk of pickups) {
       ctx.save();
       ctx.globalAlpha = clamp(pk.life / 2, 0.3, 1);
-      if (pk.ability) {
+      if (pk.credits) {
+        // Moneda de creditos: rombo dorado, distinto del orbe verde de curacion.
+        const s = pk.r + 1;
+        ctx.fillStyle = '#ffd23c';
+        ctx.strokeStyle = '#7a5c12';
+        ctx.lineWidth = 1.5;
+        ctx.shadowColor = '#ffd23c'; ctx.shadowBlur = 10;
+        ctx.translate(pk.x, pk.y);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillRect(-s / 2, -s / 2, s, s);
+        ctx.strokeRect(-s / 2, -s / 2, s, s);
+      } else if (pk.ability) {
         // Habilidad dropeada por el jefe: anillo pulsante del color de esa
         // habilidad, bien distinto del orbe verde normal de curacion.
         const meta = ABILITY_META[pk.ability] || ABILITY_META.laser;
@@ -4400,12 +5106,25 @@
         ctx.restore();
       }
 
+      // Elite: aura pulsante del color de su afijo.
+      if (e.affix && AFFIX_META[e.affix]) {
+        const au = AFFIX_META[e.affix].aura;
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220 + e.id);
+        ctx.save();
+        ctx.globalAlpha = 0.35 + pulse * 0.35;
+        ctx.strokeStyle = au;
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = au; ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 5 + pulse * 3, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      }
+
       ctx.fillStyle = e.color;
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2); ctx.fill();
       const w = e.r * 2;
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(e.x - w / 2, e.y - e.r - 10, w, 4);
-      ctx.fillStyle = '#3cff8f';
+      ctx.fillStyle = e.affix ? AFFIX_META[e.affix].aura : '#3cff8f';
       ctx.fillRect(e.x - w / 2, e.y - e.r - 10, w * clamp(e.hp / e.maxHp, 0, 1), 4);
     }
 
@@ -4415,16 +5134,146 @@
     drawBoss();
     drawBeams();
 
-    if (ally && !ally.dead) { drawLaserChargeFor(ally, ally.aim); drawShip(ally, ally.aim); drawShieldFor(ally, ally.aim); }
-    if (ally2 && !ally2.dead) { drawLaserChargeFor(ally2, ally2.aim); drawShip(ally2, ally2.aim); drawShieldFor(ally2, ally2.aim); }
+    if (ally && !ally.dead) { drawDrones(ally); drawLaserChargeFor(ally, ally.aim); drawShip(ally, ally.aim); drawShieldFor(ally, ally.aim); drawChargeFor(ally, ally.aim); }
+    if (ally2 && !ally2.dead) { drawDrones(ally2); drawLaserChargeFor(ally2, ally2.aim); drawShip(ally2, ally2.aim); drawShieldFor(ally2, ally2.aim); drawChargeFor(ally2, ally2.aim); }
     if (me && !me.dead) {
       const myAim = (currentRole === 'client' || currentRole === 'client2') ? Math.atan2(mouse.y - me.y, mouse.x - me.x) : me.aim;
+      drawDrones(me);
       drawLaserChargeFor(me, myAim);
       drawShip(me, myAim);
       drawShieldFor(me, myAim);
+      drawChargeFor(me, myAim);
     }
 
+    drawRoomOverlay();
     drawMinimap();
+    drawRoomBanner();
+  }
+
+  // Drones orbitando (transformacion). El angulo se deriva del tiempo, igual
+  // en host y cliente, asi no hay que mandar posiciones.
+  function drawDrones(p) {
+    if (!p || !p.drones) return;
+    const base = performance.now() / 1000 * 2.2;
+    for (let i = 0; i < p.drones; i++) {
+      const a = base + i * (Math.PI * 2 / p.drones);
+      const x = p.x + Math.cos(a) * 34, y = p.y + Math.sin(a) * 34;
+      ctx.save();
+      ctx.fillStyle = '#bde8ff';
+      ctx.shadowColor = '#7cf0ff'; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // Indicador de carga del "cañon de carga" (transformacion): arco alrededor
+  // de la nave que se llena.
+  function drawChargeFor(p, ang) {
+    if (!p || p.dead || !p.chargeShot || !(p.chargeT > 0.05)) return;
+    const t = clamp(p.chargeT / 1.4, 0, 1);
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.globalAlpha = 0.5 + 0.4 * t;
+    ctx.strokeStyle = t >= 1 ? '#ffe066' : '#ff9a3c';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#ffb347'; ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(0, 0, p.r + 8, -Math.PI / 2, -Math.PI / 2 + t * Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Viñeta de "oscuridad" (modificador de sala) o "nebulosa" (tema de galaxia).
+  function drawRoomOverlay() {
+    let strength = 0;
+    if (currentRoom && currentRoom.mod === 'oscuridad') strength = 0.82;
+    else if (galaxyTheme().rule === 'nebulosa') strength = 0.4;
+    if (!strength) return;
+    const cx = (me && !me.dead) ? me.x : canvas.width / 2;
+    const cy = (me && !me.dead) ? me.y : canvas.height / 2;
+    const inner = strength > 0.6 ? 150 : 320;
+    const g = ctx.createRadialGradient(cx, cy, inner, cx, cy, inner + 380);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(0,0,0,' + strength + ')');
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+
+  // Aviso grande al entrar en una sala especial / con modificador. Tambien
+  // muestra el reloj del modificador "contrarreloj".
+  function drawRoomBanner() {
+    if (currentRoom && currentRoom.mod === 'contrarreloj' && roomTimer > 0 && roomPhase === 'fight') {
+      ctx.save();
+      ctx.font = 'bold 26px Segoe UI, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = roomTimer < 5 ? '#ff6a6a' : '#ffd23c';
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 6;
+      ctx.fillText('⏱ ' + roomTimer.toFixed(1), canvas.width / 2, 40);
+      ctx.restore();
+    }
+    if (!roomBanner) return;
+    const a = clamp(roomBanner.t / 0.5, 0, 1) * clamp((2.4 - roomBanner.t) / 0.3, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = roomBanner.color;
+    ctx.shadowColor = '#000'; ctx.shadowBlur = 8;
+    ctx.font = 'bold 40px Segoe UI, Arial, sans-serif';
+    ctx.fillText(roomBanner.text, canvas.width / 2, canvas.height * 0.28);
+    if (roomBanner.sub) {
+      ctx.font = '18px Segoe UI, Arial, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillText(roomBanner.sub, canvas.width / 2, canvas.height * 0.28 + 30);
+    }
+    ctx.restore();
+  }
+
+  // Pods de tienda / trato.
+  function drawPods() {
+    for (const pod of pods) {
+      const affordable = pod.kind === 'deal' || credits >= pod.cost;
+      const col = pod.taken ? '#555b6b'
+        : pod.kind === 'deal' ? '#c9a0ff'
+        : pod.kind === 'heal' ? '#3cff8f'
+        : pod.kind === 'ability' ? '#4de1ff' : '#ffd23c';
+      ctx.save();
+      ctx.globalAlpha = pod.taken ? 0.4 : 1;
+      ctx.strokeStyle = col;
+      ctx.fillStyle = col;
+      ctx.lineWidth = 3;
+      ctx.shadowColor = col; ctx.shadowBlur = pod.taken ? 0 : 14;
+      const pulse = pod.taken ? 0 : 0.5 + 0.5 * Math.sin(performance.now() / 260);
+      ctx.beginPath(); ctx.arc(pod.x, pod.y, pod.r + pulse * 3, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = (pod.taken ? 0.2 : 0.35);
+      ctx.beginPath(); ctx.arc(pod.x, pod.y, pod.r * 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+
+      // Etiqueta: que es y cuanto cuesta.
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 13px Segoe UI, Arial, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+      let title = '';
+      if (pod.taken) title = pod.kind === 'deal' ? '—' : 'AGOTADO';
+      else if (pod.kind === 'upgrade') title = (pod.upgrade ? pod.upgrade.name : 'Mejora');
+      else if (pod.kind === 'heal') title = 'Reparar 60%';
+      else if (pod.kind === 'ability') title = 'Habilidad: ' + ((ABILITY_META[pod.ability] || {}).label || pod.ability);
+      else if (pod.kind === 'deal') title = (pod.upgrade ? pod.upgrade.name : 'Pacto');
+      ctx.fillText(title, pod.x, pod.y - pod.r - 20);
+      if (!pod.taken && pod.kind === 'deal' && pod.curse && CURSES[pod.curse]) {
+        ctx.fillStyle = '#ff9a9a';
+        ctx.font = '12px Segoe UI, Arial, sans-serif';
+        ctx.fillText('maldición: ' + CURSES[pod.curse].label, pod.x, pod.y - pod.r - 4);
+      } else if (!pod.taken && pod.kind !== 'deal') {
+        ctx.fillStyle = affordable ? '#ffd23c' : '#ff6a6a';
+        ctx.font = 'bold 13px Segoe UI, Arial, sans-serif';
+        ctx.fillText(pod.cost + ' cr', pod.x, pod.y - pod.r - 4);
+      }
+      ctx.restore();
+    }
   }
 
   const ROOM_COLORS = {
@@ -4433,6 +5282,8 @@
     [ROOM_BONUS]: '#ffd23c',
     [ROOM_BOSS]: '#ff4d4d',
     [ROOM_MINIBOSS]: '#ff8c3c',
+    [ROOM_SHOP]: '#7cf0ff',
+    [ROOM_DEAL]: '#c9a0ff',
   };
 
   function drawPortals() {
@@ -4564,6 +5415,15 @@
         ctx.strokeStyle = color;
         ctx.lineWidth = isCurrent ? 2.5 : 1;
         ctx.strokeRect(x, y, cell, cell);
+
+        // Punto en la esquina si la sala tiene modificador.
+        if (room.mod && room.visited && ROOM_MODS[room.mod]) {
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = ROOM_MODS[room.mod].color;
+          ctx.beginPath();
+          ctx.arc(x + cell - 3, y + 3, 2.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
 
         if (isCurrent) {
           ctx.globalAlpha = 1;
@@ -4759,6 +5619,7 @@
     // hasta tener radio negativo y el juego se caia al dibujarlas.
     const dt = clamp((ts - lastTime) / 1000 || 0, 0, 0.033) * adminTimeScale;
     lastTime = ts;
+    if (roomBanner) { roomBanner.t -= dt; if (roomBanner.t <= 0) roomBanner = null; }
     // Si algo falla, antes el juego se congelaba sin decir nada porque la
     // excepcion cortaba el requestAnimationFrame. Ahora se muestra el error.
     try {
@@ -4803,9 +5664,32 @@
       }
     }
     gameoverSub.textContent = sub;
+    if (dailyBoard) { dailyBoard.classList.add('hidden'); dailyBoard.innerHTML = ''; }
+    if (dailyMode && currentRole === 'solo') showDailyBoard();
     menuPanel.classList.add('hidden');
     gameoverPanel.classList.remove('hidden');
     overlay.classList.remove('hidden');
+  }
+
+  async function showDailyBoard() {
+    if (!dailyBoard) return;
+    dailyBoard.classList.remove('hidden');
+    dailyBoard.innerHTML = '<b>Reto diario ' + Cloud.dailyId() + '</b><br>Enviando…';
+    await Cloud.submitDaily({ galaxy, score });
+    const rows = await Cloud.fetchDaily(20);
+    const myUid = Cloud.user() && Cloud.user().uid;
+    let html = '<b>Reto diario ' + Cloud.dailyId() + '</b><ol style="margin:6px 0 0;padding-left:22px;">';
+    if (!rows.length) html += '<li style="list-style:none;color:#9fb0c8;">(aún nadie ha puntuado)</li>';
+    for (const r of rows) {
+      const mine = r.uid === myUid;
+      html += '<li style="' + (mine ? 'color:#ffd23c;font-weight:bold;' : '') + '">'
+        + escapeHtml(r.username || 'jugador') + ' — ' + (r.score | 0) + ' (gal. ' + (r.galaxy | 0) + ')</li>';
+    }
+    html += '</ol>';
+    dailyBoard.innerHTML = html;
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
   function startGame(role, meInfo, allyInf, allyInf2) {
@@ -4820,14 +5704,25 @@
   // ---------- lobby / networking wiring ----------
   document.getElementById('solo-btn').addEventListener('click', () => {
     saveIdentity();
+    dailyMode = false;
     Cloud.setSavedRun(null); // "Play Solo" empieza de cero; el checkpoint viejo se descarta
-    startGame('solo', { name: effectiveName(), skin: mySkin, projectile: myProjectile }, null);
+    startGame('solo', { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip }, null);
+  });
+
+  const dailyBtn = document.getElementById('daily-btn');
+  if (dailyBtn) dailyBtn.addEventListener('click', () => {
+    if (!Cloud.user()) { flashAccStatus('El reto diario necesita cuenta (para puntuar).'); return; }
+    saveIdentity();
+    dailyMode = true;
+    Cloud.setSavedRun(null);
+    startGame('solo', { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip }, null);
   });
 
   continueBtn.addEventListener('click', () => {
     const run = Cloud.getSavedRun();
     if (!run) { updateContinueButton(); return; }
     saveIdentity();
+    dailyMode = false;
     startSavedGame(run);
   });
 
@@ -4907,17 +5802,17 @@
         c.once('data', data => {
           if (data.t === 'spectate') { addSpectator(c, data); return; }
           if (data.t !== 'join' || !lobbyOpen) { c.close(); return; }
-          const hostInfoMsg = { name: effectiveName(), skin: mySkin, projectile: myProjectile };
+          const hostInfoMsg = { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip };
           if (!allyInfo) {
             conn = c;
-            allyInfo = { name: data.name, skin: data.skin, projectile: data.projectile };
+            allyInfo = { name: data.name, skin: data.skin, projectile: data.projectile, ship: data.ship };
             safeSend({ t: 'room', v: GAME_VERSION, slot: 1, host: hostInfoMsg }, c);
             setVersionStatus(hostStatus, data.v, '¡Jugador conectado!');
             broadcastRoster();
             setupHostDataHandlers(c, 1);
           } else if (!allyInfo2) {
             conn2 = c;
-            allyInfo2 = { name: data.name, skin: data.skin, projectile: data.projectile };
+            allyInfo2 = { name: data.name, skin: data.skin, projectile: data.projectile, ship: data.ship };
             safeSend({ t: 'room', v: GAME_VERSION, slot: 2, host: hostInfoMsg }, c);
             setVersionStatus(hostStatus, data.v, '¡Segundo jugador conectado!');
             broadcastRoster();
@@ -4961,7 +5856,7 @@
       conn = peer.connect(code, { reliable: true });
       conn.on('open', () => {
         setupClientDataHandlers();
-        safeSend({ t: 'join', v: GAME_VERSION, name: effectiveName(), skin: mySkin, projectile: myProjectile });
+        safeSend({ t: 'join', v: GAME_VERSION, name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip });
         joinForm.classList.add('hidden');
         joinPlayerList.classList.remove('hidden');
         joinWaitText.classList.remove('hidden');
@@ -5090,7 +5985,7 @@
 
   startHostedBtn.addEventListener('click', () => {
     lobbyOpen = false;
-    const meInfo = { name: effectiveName(), skin: mySkin, projectile: myProjectile };
+    const meInfo = { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip };
     safeSend({ t: 'start', host: meInfo }, conn);
     if (conn2) safeSend({ t: 'start', host: meInfo }, conn2);
     startGame('host', meInfo, allyInfo, allyInfo2);
@@ -5115,7 +6010,7 @@
         renderPlayerList(joinPlayerList, data.players);
       } else if (data.t === 'start') {
         hostInfo = data.host || hostInfo;
-        startGame(myClientSlot === 2 ? 'client2' : 'client', { name: effectiveName(), skin: mySkin, projectile: myProjectile }, hostInfo);
+        startGame(myClientSlot === 2 ? 'client2' : 'client', { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip }, hostInfo);
       } else if (data.t === 'state') {
         applyState(data);
       }
@@ -5263,10 +6158,24 @@
           { label: 'Elegir mejora', act: () => { pendingUpgrades = Math.max(1, pendingUpgrades); offerUpgrade(); } },
           { label: 'Ir a bonus', act: () => adminGoto(ROOM_BONUS) },
           { label: 'Ir a miniboss', act: () => adminGoto(ROOM_MINIBOSS) },
+          { label: 'Ir a tienda', act: () => adminGoto(ROOM_SHOP) },
+          { label: 'Ir a trato', act: () => adminGoto(ROOM_DEAL) },
           { label: 'Ir a jefe', act: () => adminGoto(ROOM_BOSS) },
           { label: 'Siguiente galaxia', act: () => nextGalaxy() },
           { label: '+5000 pts', act: () => { score += 5000; } },
+          { label: '+500 créditos', act: () => { credits += 500; } },
         ],
+      },
+      {
+        title: 'Contenido nuevo',
+        buttons: [
+          { label: 'Dron', act: () => { if (me) me.drones = Math.min(2, (me.drones || 0) + 1); } },
+          { label: 'Cañón carga', toggle: () => { if (me) me.chargeShot = !me.chargeShot; }, state: () => me && me.chargeShot },
+          { label: 'Rebote', toggle: () => { if (me) me.ricochet = !me.ricochet; }, state: () => me && me.ricochet },
+          { label: 'Tiro trasero', toggle: () => { if (me) me.backshot = !me.backshot; }, state: () => me && me.backshot },
+        ].concat(AFFIX_IDS.map(a => ({ label: 'Élite ' + a, act: () => { if (enemies.length) { enemies[0].affix = a; enemies[0].armor = a === 'blindado' ? 3 : 0; } else spawnEnemy({ type: 'grunt', affix: a }); } }))).concat(
+          ROOM_MOD_IDS.map(m => ({ label: 'Mod ' + m, act: () => { if (currentRoom) { currentRoom.mod = m; showRoomBanner(ROOM_MODS[m].label, ROOM_MODS[m].color, ROOM_MODS[m].blurb); } } }))
+        ),
       },
       {
         title: 'Cuenta',
@@ -5406,6 +6315,7 @@
   window.addEventListener('beforeunload', () => {
     if (currentRole === 'solo' && running && !gameOverFlag) checkpointSave();
   });
+
 })();
 
 // Registro del service worker, fuera del IIFE del juego (no le hace falta
