@@ -535,10 +535,10 @@
   /* ---------- panel de pruebas (cuenta admin) ---------- */
   #admin-panel {
     position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 300px;
-    max-height: calc(100% - 16px);
+    top: 172px;
+    left: 8px;
+    width: 290px;
+    max-height: calc(100% - 182px);
     display: flex;
     flex-direction: column;
     background: rgba(10, 12, 18, 0.94);
@@ -553,6 +553,15 @@
     padding: 8px 12px;
     border-bottom: 1px solid #3a2b55;
     font-weight: 700; letter-spacing: 1px; color: #c9a6ff;
+    cursor: move;
+    user-select: none;
+  }
+  #admin-info {
+    padding: 6px 12px;
+    border-bottom: 1px solid #2a2140;
+    font-size: 10px; line-height: 1.5;
+    color: #7f8cb0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
   }
   #admin-close {
     background: none; box-shadow: none; border: none; color: #c9a6ff;
@@ -631,9 +640,10 @@
          admin, y solo en partida en solitario. Se abre/cierra con la tecla \ -->
     <div id="admin-panel" class="hidden">
       <div id="admin-head">
-        <span>MODO PRUEBAS</span>
+        <span>≡ MODO PRUEBAS</span>
         <button type="button" id="admin-close">✕</button>
       </div>
+      <div id="admin-info"></div>
       <div id="admin-body"></div>
     </div>
 
@@ -1130,6 +1140,7 @@
       // La cuenta "Osaman" (cualquier caja) es la de pruebas: desbloquea el
       // panel de admin y todos los cosmeticos.
       isAdmin: () => !!(save && String(save.username || '').trim().toLowerCase() === 'osaman'),
+      persist: () => scheduleWrite(),
 
       init() {
         if (typeof firebase === 'undefined' || !firebase.initializeApp) {
@@ -1769,7 +1780,14 @@
   let lastShownLevelUpId = 0;
   let myUpgradeSent = false;
   let clientGameOverShown = false;
-  let adminGod = false; // modo dios del panel de pruebas (cuenta admin)
+  // Interruptores del panel de pruebas (cuenta admin). Todos empiezan
+  // apagados y solo hacen algo si la cuenta es admin y el panel los activa.
+  let adminGod = false;
+  let adminOneShot = false;
+  let adminNoCd = false;
+  let adminSpeed2 = false;
+  let adminTimeScale = 1;
+  let adminAtCursor = false;
 
   // ---------- game state ----------
   let running = false;
@@ -2143,7 +2161,7 @@
     else openPortals();
 
     overlay.classList.add('hidden');
-    document.getElementById('admin-panel').classList.add('hidden');
+    adminReset();
     updateHud();
     updateBossHud();
     running = true;
@@ -3101,7 +3119,8 @@
   function updatePlayerAbilities(dt, activePlayers) {
     for (const p of activePlayers) {
       if (!p.ability) continue;
-      if (p.abilityCd > 0) p.abilityCd -= dt;
+      if (adminNoCd && p === me) p.abilityCd = 0;
+      else if (p.abilityCd > 0) p.abilityCd -= dt;
       if (p.shieldTimer > 0) p.shieldTimer -= dt;
     }
   }
@@ -3173,7 +3192,7 @@
       : label;
   }
 
-  function spawnEnemy(type) {
+  function spawnEnemy(type, atX, atY) {
     const side = Math.floor(rand(0, 4));
     let x, y;
     const margin = 40;
@@ -3181,6 +3200,8 @@
     else if (side === 1) { x = canvas.width + margin; y = rand(0, canvas.height); }
     else if (side === 2) { x = rand(0, canvas.width); y = -margin; }
     else { x = rand(0, canvas.width); y = canvas.height + margin; }
+    const placed = (typeof atX === 'number');
+    if (placed) { x = atX; y = atY; }
 
     const base = {
       grunt:   { r: 16, speed: 78,  hp: 22, dmg: 10, color: '#ff5a5a', score: 10 },
@@ -3209,7 +3230,7 @@
       r: base.r,
       speed: base.speed * (1 + ((galaxy - 1) * 4 + roomsCleared) * 0.03),
       hp, maxHp: hp,
-      entered: false, // aun no ha llegado dentro de la pantalla, ver [contencion de enemigos]
+      entered: placed, // si se coloca a mano (panel de pruebas) ya nace "dentro"
       dmg: base.dmg,
       color: base.color,
       scoreVal: base.score,
@@ -3298,8 +3319,9 @@
 
   function movePlayer(p, input, dt) {
     const len = Math.hypot(input.mx, input.my) || 1;
-    p.x += (input.mx / len) * p.speed * dt;
-    p.y += (input.my / len) * p.speed * dt;
+    const spd = (adminSpeed2 && p === me) ? p.speed * 2 : p.speed;
+    p.x += (input.mx / len) * spd * dt;
+    p.y += (input.my / len) * spd * dt;
     p.x = clamp(p.x, p.r, canvas.width - p.r);
     p.y = clamp(p.y, p.r, canvas.height - p.r);
     p.aim = input.aimAngle;
@@ -3320,7 +3342,9 @@
         y: p.y + Math.sin(a) * (p.r + 6),
         vx: Math.cos(a) * p.bulletSpeed,
         vy: Math.sin(a) * p.bulletSpeed,
-        r: style.r, life: p.bulletLife, friendly: true, dmg: p.dmg, pierce: p.pierce, style: p.projectile,
+        r: style.r, life: p.bulletLife, friendly: true,
+        dmg: (adminOneShot && p === me) ? 999999 : p.dmg,
+        pierce: p.pierce, style: p.projectile,
       });
     }
   }
@@ -4567,7 +4591,7 @@
     // elegir una mejora. Sin el tope de abajo, ese primer dt salia negativo y
     // el tiempo corria hacia atras: las ondas expansivas crecian al reves
     // hasta tener radio negativo y el juego se caia al dibujarlas.
-    const dt = clamp((ts - lastTime) / 1000 || 0, 0, 0.033);
+    const dt = clamp((ts - lastTime) / 1000 || 0, 0, 0.033) * adminTimeScale;
     lastTime = ts;
     // Si algo falla, antes el juego se congelaba sin decir nada porque la
     // excepcion cortaba el requestAnimationFrame. Ahora se muestra el error.
@@ -4603,7 +4627,7 @@
     running = false;
     Sound.gameOver();
     bossBar.classList.add('hidden');
-    document.getElementById('admin-panel').classList.add('hidden');
+    adminHide();
     let sub = `Puntos: ${score} - galaxia ${galaxy}, ${roomsCleared} salas superadas`;
     if (currentRole === 'solo') {
       const nuevos = Cloud.onRunEnd({ galaxy, score });
@@ -4620,7 +4644,7 @@
 
   function startGame(role, meInfo, allyInf, allyInf2) {
     resetGame(role, meInfo, allyInf, allyInf2);
-    document.getElementById('admin-panel').classList.add('hidden');
+    adminReset();
     overlay.classList.add('hidden');
     running = true;
     lastTime = performance.now();
@@ -4932,18 +4956,30 @@
 
   // ============ PANEL DE PRUEBAS (cuenta admin "Osaman") ============
   // Solo aparece si juegas en solitario con la cuenta de admin. Se abre/cierra
-  // con la tecla \ . Llama a las mismas funciones internas que usa el juego,
-  // asi que no duplica logica: solo las dispara a mano.
+  // con la tecla \ , se arrastra por la cabecera y recuerda sitio y estado.
+  // Cada boton llama a las funciones internas que ya usa el juego: no duplica
+  // logica, solo la dispara a mano.
   const adminPanel = document.getElementById('admin-panel');
   const adminBody = document.getElementById('admin-body');
-  let adminBuilt = false;
+  const adminInfo = document.getElementById('admin-info');
+  let adminCount = 1;               // cuantos enemigos por clic
+  const adminSyncers = [];          // fns que refrescan el estado visual de cada boton
 
   function adminAvailable() {
     return Cloud.isAdmin() && currentRole === 'solo' && !!me && !gameOverFlag;
   }
+  function activePlayersNow() {
+    const a = [me]; if (ally) a.push(ally); if (ally2) a.push(ally2); return a;
+  }
 
   const ADMIN_ENEMIES = ['grunt', 'fast', 'shooter', 'tank', 'bomber', 'sniper', 'kamikaze', 'splitter'];
 
+  function adminSpawn(type) {
+    for (let i = 0; i < adminCount; i++) {
+      if (adminAtCursor) spawnEnemy(type, clamp(mouse.x + rand(-14, 14), 20, LOGICAL_W - 20), clamp(mouse.y + rand(-14, 14), 20, LOGICAL_H - 20));
+      else spawnEnemy(type);
+    }
+  }
   function adminSpawnBoss(i) {
     if (boss) sfx('bossMusicStop');
     boss = null; beams.length = 0; meteors.length = 0;
@@ -4961,61 +4997,124 @@
     me.bulletSpeed = STAT_CAPS.bulletSpeed;
     me.bulletLife = STAT_CAPS.bulletLife;
   }
+  function adminGiveAbility(a) { if (me) { me.ability = a; me.abilityCd = 0; me.shieldTimer = 0; } }
+  function adminDrop(kind) {
+    if (!me) return;
+    const p = { x: me.x + rand(-30, 30), y: me.y + rand(-30, 30), r: 10, life: 20 };
+    if (kind === 'heal') { p.r = 8; p.life = 12; p.heal = 40; } else p.ability = kind;
+    pickups.push(p);
+  }
+  function adminGoto(type) {
+    const r = roomGrid.flat().find(rm => rm && rm.type === type);
+    if (r) enterRoom(r, null);
+  }
+  function adminUnlockAll() {
+    const s = Cloud.save(); if (!s) return;
+    for (const kind of ['skin', 'projectile']) {
+      const list = kind === 'skin' ? s.unlocks.skins : s.unlocks.projectiles;
+      for (const id in COSMETIC_UNLOCKS[kind]) if (list.indexOf(id) === -1) list.push(id);
+    }
+    Cloud.persist(); refreshPickers();
+  }
+  function adminResetStats() {
+    const s = Cloud.save(); if (!s) return;
+    s.stats = { bestGalaxy: 1, bestScore: 0, bossesKilled: 0, roomsTotal: 0, runs: 0 };
+    s.unlocks = { skins: [], projectiles: [] };
+    s.savedRun = null;
+    Cloud.persist(); refreshPickers(); updateContinueButton();
+  }
 
-  const ADMIN_SECTIONS = [
-    {
-      title: 'Enemigos',
-      buttons: ADMIN_ENEMIES.map(t => ({ label: t, act: () => spawnEnemy(t) })).concat([
-        { label: 'miniboss', act: () => spawnMiniBoss() },
-        { label: 'x5 al azar', act: () => { for (let i = 0; i < 5; i++) spawnEnemy(ADMIN_ENEMIES[Math.floor(Math.random() * ADMIN_ENEMIES.length)]); } },
-      ]),
-    },
-    {
-      title: 'Jefes',
-      buttons: BOSS_TYPES.map((b, i) => ({ label: b.name, act: () => adminSpawnBoss(i) })).concat([
-        { label: 'Matar jefe', act: () => { if (boss) killBoss(); } },
-      ]),
-    },
-    {
-      title: 'Habilidad',
-      buttons: [
-        { label: 'Láser', act: () => { if (me) { me.ability = 'laser'; me.abilityCd = 0; me.shieldTimer = 0; } } },
-        { label: 'Meteoro', act: () => { if (me) { me.ability = 'meteor'; me.abilityCd = 0; me.shieldTimer = 0; } } },
-        { label: 'Escudo', act: () => { if (me) { me.ability = 'shield'; me.abilityCd = 0; me.shieldTimer = 0; } } },
-        { label: 'Quitar', act: () => { if (me) { me.ability = null; me.shieldTimer = 0; } } },
-      ],
-    },
-    {
-      title: 'Items',
-      buttons: [
-        { label: 'Curación', act: () => { if (me) pickups.push({ x: me.x + rand(-30, 30), y: me.y + rand(-30, 30), r: 8, life: 12, heal: 40 }); } },
-        { label: 'Drop habilidad', act: () => { if (me) pickups.push({ x: me.x + rand(-30, 30), y: me.y + rand(-30, 30), r: 10, life: 20, ability: ABILITY_TYPES[Math.floor(Math.random() * ABILITY_TYPES.length)] }); } },
-      ],
-    },
-    {
-      title: 'Nave',
-      buttons: [
-        { label: 'MAX stats', act: adminMaxStats },
-        { label: 'Curar', act: () => { if (me) { me.hp = me.maxHp; me.dead = false; } } },
-        { label: '+1 proyectil', act: () => { if (me) me.shotCount = Math.min(STAT_CAPS.shotCount, me.shotCount + 1); } },
-        { label: '+10 daño', act: () => { if (me) me.dmg = Math.min(STAT_CAPS.dmg, me.dmg + 10); } },
-        { label: 'Modo dios', toggle: () => (adminGod = !adminGod), state: () => adminGod },
-      ],
-    },
-    {
-      title: 'Progreso',
-      buttons: [
-        { label: 'Limpiar sala', act: () => { spawnQueue = []; enemies = []; if (boss) killBoss(); else onRoomCleared(); } },
-        { label: 'Elegir mejora', act: () => { pendingUpgrades = Math.max(1, pendingUpgrades); offerUpgrade(); } },
-        { label: 'Siguiente galaxia', act: () => nextGalaxy() },
-        { label: '+5000 pts', act: () => { score += 5000; } },
-      ],
-    },
-  ];
+  function adminSections() {
+    return [
+      {
+        title: 'Enemigos',
+        buttons: [
+          { label: '⌖ en cursor', toggle: () => (adminAtCursor = !adminAtCursor), state: () => adminAtCursor },
+          { label: 'x1', set: () => (adminCount = 1), active: () => adminCount === 1 },
+          { label: 'x3', set: () => (adminCount = 3), active: () => adminCount === 3 },
+          { label: 'x10', set: () => (adminCount = 10), active: () => adminCount === 10 },
+        ].concat(ADMIN_ENEMIES.map(t => ({ label: t, act: () => adminSpawn(t) }))).concat([
+          { label: 'miniboss', act: () => spawnMiniBoss() },
+        ]),
+      },
+      {
+        title: 'Jefes',
+        buttons: BOSS_TYPES.map((b, i) => ({ label: b.name, act: () => adminSpawnBoss(i) })).concat([
+          { label: 'Fase +', act: () => { if (boss && boss.phase < 3) boss.hp = Math.min(boss.hp, boss.maxHp * (boss.phase === 1 ? 0.64 : 0.29)); } },
+          { label: 'Forzar habilidad', act: () => { if (boss) bossStartAbility(pickBossAbility(), activePlayersNow()); } },
+          { label: 'Curar jefe', act: () => { if (boss) boss.hp = boss.maxHp; } },
+          { label: 'Matar jefe', act: () => { if (boss) killBoss(); } },
+        ]),
+      },
+      {
+        title: 'Habilidad',
+        buttons: [
+          { label: 'Láser', act: () => adminGiveAbility('laser') },
+          { label: 'Meteoro', act: () => adminGiveAbility('meteor') },
+          { label: 'Escudo', act: () => adminGiveAbility('shield') },
+          { label: 'Quitar', act: () => { if (me) { me.ability = null; me.shieldTimer = 0; } } },
+          { label: 'Sin recarga', toggle: () => (adminNoCd = !adminNoCd), state: () => adminNoCd },
+        ],
+      },
+      {
+        title: 'Items (junto a ti)',
+        buttons: [
+          { label: 'Curación', act: () => adminDrop('heal') },
+          { label: 'Drop láser', act: () => adminDrop('laser') },
+          { label: 'Drop meteoro', act: () => adminDrop('meteor') },
+          { label: 'Drop escudo', act: () => adminDrop('shield') },
+        ],
+      },
+      {
+        title: 'Nave',
+        buttons: [
+          { label: 'MAX stats', act: adminMaxStats },
+          { label: 'Curar', act: () => { if (me) { me.hp = me.maxHp; me.dead = false; } } },
+          { label: '+1 proyectil', act: () => { if (me) me.shotCount = Math.min(STAT_CAPS.shotCount, me.shotCount + 1); } },
+          { label: '+10 daño', act: () => { if (me) me.dmg = Math.min(STAT_CAPS.dmg, me.dmg + 10); } },
+          { label: 'Modo dios', toggle: () => (adminGod = !adminGod), state: () => adminGod },
+          { label: '1 disparo mata', toggle: () => (adminOneShot = !adminOneShot), state: () => adminOneShot },
+          { label: 'Velocidad x2', toggle: () => (adminSpeed2 = !adminSpeed2), state: () => adminSpeed2 },
+        ],
+      },
+      {
+        title: 'Tiempo',
+        buttons: [
+          { label: '0.25×', set: () => (adminTimeScale = 0.25), active: () => adminTimeScale === 0.25 },
+          { label: '0.5×', set: () => (adminTimeScale = 0.5), active: () => adminTimeScale === 0.5 },
+          { label: '1×', set: () => (adminTimeScale = 1), active: () => adminTimeScale === 1 },
+          { label: '2×', set: () => (adminTimeScale = 2), active: () => adminTimeScale === 2 },
+        ],
+      },
+      {
+        title: 'Salas y progreso',
+        buttons: [
+          { label: 'Limpiar sala', act: () => { spawnQueue = []; enemies = []; if (boss) killBoss(); else onRoomCleared(); } },
+          { label: 'Matar todo', act: () => { enemies.length = 0; } },
+          { label: 'Elegir mejora', act: () => { pendingUpgrades = Math.max(1, pendingUpgrades); offerUpgrade(); } },
+          { label: 'Ir a bonus', act: () => adminGoto(ROOM_BONUS) },
+          { label: 'Ir a miniboss', act: () => adminGoto(ROOM_MINIBOSS) },
+          { label: 'Ir a jefe', act: () => adminGoto(ROOM_BOSS) },
+          { label: 'Siguiente galaxia', act: () => nextGalaxy() },
+          { label: '+5000 pts', act: () => { score += 5000; } },
+        ],
+      },
+      {
+        title: 'Cuenta',
+        buttons: [
+          { label: 'Desbloquear todo', act: adminUnlockAll },
+          { label: 'Reiniciar stats', act: adminResetStats },
+        ],
+      },
+    ];
+  }
+
+  function refreshAdminStates() { adminSyncers.forEach(fn => fn()); }
 
   function buildAdminPanel() {
     adminBody.innerHTML = '';
-    ADMIN_SECTIONS.forEach(sec => {
+    adminSyncers.length = 0;
+    adminSections().forEach(sec => {
       const g = document.createElement('div');
       g.className = 'admin-group';
       const h = document.createElement('h4');
@@ -5030,12 +5129,16 @@
         btn.textContent = b.label;
         if (b.toggle) {
           const sync = () => btn.classList.toggle('on', !!b.state());
-          sync();
+          adminSyncers.push(sync); sync();
           btn.addEventListener('click', () => { b.toggle(); sync(); });
+        } else if (b.set) {
+          const sync = () => btn.classList.toggle('on', !!b.active());
+          adminSyncers.push(sync); sync();
+          btn.addEventListener('click', () => { b.set(); refreshAdminStates(); buildAdminPanel(); });
         } else {
           btn.addEventListener('click', () => {
             try { b.act(); } catch (e) { console.warn('[admin]', e); }
-            updateHud(); updateBossHud();
+            updateHud(); updateBossHud(); updateAdminInfo();
           });
         }
         row.appendChild(btn);
@@ -5043,21 +5146,90 @@
       g.appendChild(row);
       adminBody.appendChild(g);
     });
-    adminBuilt = true;
   }
 
+  function updateAdminInfo() {
+    if (!adminInfo) return;
+    const en = enemies.length, bu = bullets.length;
+    const bs = boss ? `jefe ${Math.round(clamp(boss.hp / boss.maxHp, 0, 1) * 100)}% f${boss.phase} ${boss.state}` : 'sin jefe';
+    adminInfo.textContent =
+      `G${galaxy}  sala ${roomsCleared}  pts ${score}\n` +
+      `enemigos ${en}   balas ${bu}\n` +
+      `${bs}   tiempo x${adminTimeScale}` +
+      (adminGod || adminOneShot || adminNoCd || adminSpeed2 ? '\ntrucos: ' +
+        [adminGod && 'dios', adminOneShot && '1-shot', adminNoCd && 'sin-cd', adminSpeed2 && 'vel×2'].filter(Boolean).join(' ') : '');
+  }
+  let adminInfoTimer = null;
+
+  function persistAdminUi() {
+    try {
+      localStorage.setItem('cs_admin_ui', JSON.stringify({
+        open: !adminPanel.classList.contains('hidden'),
+        left: adminPanel.style.left || '', top: adminPanel.style.top || '',
+      }));
+    } catch (e) {}
+  }
   function toggleAdminPanel(force) {
-    if (!adminAvailable()) { adminPanel.classList.add('hidden'); return; }
-    if (!adminBuilt) buildAdminPanel();
+    if (!adminAvailable()) { adminPanel.classList.add('hidden'); if (adminInfoTimer) { clearInterval(adminInfoTimer); adminInfoTimer = null; } return; }
     const show = force !== undefined ? force : adminPanel.classList.contains('hidden');
+    if (show) {
+      buildAdminPanel();
+      restoreAdminPos();
+      updateAdminInfo();
+      if (!adminInfoTimer) adminInfoTimer = setInterval(updateAdminInfo, 250);
+    } else if (adminInfoTimer) { clearInterval(adminInfoTimer); adminInfoTimer = null; }
     adminPanel.classList.toggle('hidden', !show);
+    persistAdminUi();
+  }
+  function restoreAdminPos() {
+    try {
+      const s = JSON.parse(localStorage.getItem('cs_admin_ui') || '{}');
+      if (s.left && s.top) { adminPanel.style.left = s.left; adminPanel.style.top = s.top; adminPanel.style.right = 'auto'; }
+    } catch (e) {}
   }
 
-  document.getElementById('admin-close').addEventListener('click', () => adminPanel.classList.add('hidden'));
+  // Arrastrar por la cabecera.
+  (() => {
+    const head = document.getElementById('admin-head');
+    let dragging = false, ox = 0, oy = 0;
+    head.addEventListener('mousedown', e => {
+      if (e.target.id === 'admin-close') return;
+      dragging = true;
+      const r = adminPanel.getBoundingClientRect();
+      ox = e.clientX - r.left; oy = e.clientY - r.top;
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      adminPanel.style.left = clamp(e.clientX - ox, 0, window.innerWidth - 80) + 'px';
+      adminPanel.style.top = clamp(e.clientY - oy, 0, window.innerHeight - 40) + 'px';
+      adminPanel.style.right = 'auto';
+    });
+    window.addEventListener('mouseup', () => { if (dragging) { dragging = false; persistAdminUi(); } });
+  })();
+
+  document.getElementById('admin-close').addEventListener('click', () => toggleAdminPanel(false));
   window.addEventListener('keydown', e => {
     if (escribiendo(e)) return;
     if (e.code === 'Backslash' || e.key === '\\') { e.preventDefault(); toggleAdminPanel(); }
   });
+  // Al empezar una partida: apaga los trucos, oculta el panel y lo reabre si
+  // estaba abierto la vez anterior.
+  function adminReset() {
+    adminGod = adminOneShot = adminNoCd = adminSpeed2 = adminAtCursor = false;
+    adminTimeScale = 1;
+    adminCount = 1;
+    adminPanel.classList.add('hidden');
+    if (adminInfoTimer) { clearInterval(adminInfoTimer); adminInfoTimer = null; }
+    try {
+      const s = JSON.parse(localStorage.getItem('cs_admin_ui') || '{}');
+      if (s.open && Cloud.isAdmin()) setTimeout(() => toggleAdminPanel(true), 80);
+    } catch (e) {}
+  }
+  function adminHide() {
+    adminPanel.classList.add('hidden');
+    if (adminInfoTimer) { clearInterval(adminInfoTimer); adminInfoTimer = null; }
+  }
 
   // Arranca Firebase (cuentas + guardado). Si no esta disponible, el juego
   // sigue en modo invitado. Se guarda un ultimo checkpoint al cerrar.
