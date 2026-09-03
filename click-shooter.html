@@ -711,6 +711,11 @@
             <div id="ship-picker" class="swatch-row"></div>
           </div>
           <p id="ship-desc" style="margin:2px 0 0;font-size:12px;color:#9fb0c8;"></p>
+          <div class="picker-row">
+            <span class="picker-label">Dificultad</span>
+            <div id="difficulty-picker" class="swatch-row"></div>
+          </div>
+          <p id="difficulty-desc" style="margin:2px 0 0;font-size:12px;color:#9fb0c8;"></p>
         </div>
 
         <div id="mode-buttons">
@@ -802,6 +807,8 @@
   const projectilePicker = document.getElementById('projectile-picker');
   const shipPicker = document.getElementById('ship-picker');
   const shipDesc = document.getElementById('ship-desc');
+  const difficultyPicker = document.getElementById('difficulty-picker');
+  const difficultyDesc = document.getElementById('difficulty-desc');
   const hostPlayerList = document.getElementById('host-player-list');
   const joinPlayerList = document.getElementById('join-player-list');
   const joinWaitText = document.getElementById('join-wait-text');
@@ -1065,6 +1072,18 @@
   const SHIP_MAP = Object.fromEntries(SHIPS.map(s => [s.id, s]));
   const DEFAULT_SHIP = 'vanguard';
 
+  // ---------- dificultad ----------
+  // Multiplicadores que aplica el anfitrion (o el solo) a la simulacion. El
+  // cliente no simula enemigos, asi que solo le llega para enseñarla. En co-op
+  // manda la del anfitrion.
+  const DIFFICULTIES = {
+    normal:    { label: 'Normal',    hp: 1,    dmg: 1,    count: 1,    heal: 1,    bossHp: 1,   eliteFrom: 2, eliteExtra: 0, revive: 0.5, enemySpeed: 1,    modBonus: 0 },
+    hard:      { label: 'Difícil',   hp: 1.4,  dmg: 1.25, count: 1.2,  heal: 0.6,  bossHp: 1.3, eliteFrom: 1, eliteExtra: 1, revive: 0.4, enemySpeed: 1.08, modBonus: 0.08 },
+    nightmare: { label: 'Pesadilla', hp: 1.9,  dmg: 1.5,  count: 1.45, heal: 0.38, bossHp: 1.7, eliteFrom: 1, eliteExtra: 2, revive: 0.3, enemySpeed: 1.16, modBonus: 0.16 },
+  };
+  let gameDifficulty = 'normal'; // fijada al empezar la partida (solo/host); el cliente la recibe
+  function diff() { return DIFFICULTIES[gameDifficulty] || DIFFICULTIES.normal; }
+
   const SKIN_MAP = Object.fromEntries(SKINS.map(s => [s.id, s]));
   const PROJECTILE_MAP = Object.fromEntries(PROJECTILES.map(p => [p.id, p]));
 
@@ -1100,6 +1119,7 @@
       identity: { name: myName, skin: 'blue', projectile: 'bolt', ship: 'vanguard' },
       unlocks: { skins: [], projectiles: [], ships: [] },
       stats: { bestGalaxy: 1, bestScore: 0, bossesKilled: 0, roomsTotal: 0, runs: 0 },
+      difficulty: 'normal',
       savedRun: null,
     };
   }
@@ -1116,6 +1136,7 @@
         ships: Array.isArray(un.ships) ? un.ships.slice() : [],
       },
       stats: Object.assign(d.stats, s.stats || {}),
+      difficulty: DIFFICULTIES[s.difficulty] ? s.difficulty : 'normal',
       savedRun: s.savedRun || null,
     };
   }
@@ -1169,11 +1190,13 @@
       if (SKIN_MAP[id.skin]) mySkin = id.skin;
       if (PROJECTILE_MAP[id.projectile]) myProjectile = id.projectile;
       if (SHIP_MAP[id.ship]) myShip = id.ship;
+      if (DIFFICULTIES[save.difficulty]) myDifficulty = save.difficulty;
       try {
         localStorage.setItem('cs_name', myName);
         localStorage.setItem('cs_skin', mySkin);
         localStorage.setItem('cs_proj', myProjectile);
         localStorage.setItem('cs_ship', myShip);
+        localStorage.setItem('cs_diff', myDifficulty);
       } catch (e) {}
     }
 
@@ -1255,6 +1278,7 @@
       syncIdentity() {
         if (!user || !save) return;
         save.identity = { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip };
+        save.difficulty = myDifficulty;
         scheduleWrite();
       },
       setSavedRun(run) {
@@ -1379,15 +1403,18 @@
   let mySkin = localStorage.getItem('cs_skin') || DEFAULT_SKIN;
   let myProjectile = localStorage.getItem('cs_proj') || DEFAULT_PROJ;
   let myShip = localStorage.getItem('cs_ship') || DEFAULT_SHIP;
+  let myDifficulty = localStorage.getItem('cs_diff') || 'normal';
   if (!SKIN_MAP[mySkin]) mySkin = DEFAULT_SKIN;
   if (!PROJECTILE_MAP[myProjectile]) myProjectile = DEFAULT_PROJ;
   if (!SHIP_MAP[myShip]) myShip = DEFAULT_SHIP;
+  if (!DIFFICULTIES[myDifficulty]) myDifficulty = 'normal';
 
   function saveIdentity() {
     localStorage.setItem('cs_name', myName);
     localStorage.setItem('cs_skin', mySkin);
     localStorage.setItem('cs_proj', myProjectile);
     localStorage.setItem('cs_ship', myShip);
+    localStorage.setItem('cs_diff', myDifficulty);
     Cloud.syncIdentity();
   }
   function effectiveName() {
@@ -1429,6 +1456,20 @@
       renderSwatches(shipPicker, SHIPS, myShip, 'ship', id => { myShip = id; saveIdentity(); refreshPickers(); });
       const s = SHIP_MAP[myShip];
       if (shipDesc) shipDesc.textContent = s ? s.desc : '';
+    }
+    if (difficultyPicker) {
+      const list = [
+        { id: 'normal',    name: 'Normal',    color: '#7cfc9a' },
+        { id: 'hard',      name: 'Difícil',   color: '#ff9d3d' },
+        { id: 'nightmare', name: 'Pesadilla', color: '#ff4d4d' },
+      ];
+      renderSwatches(difficultyPicker, list, myDifficulty, 'difficulty', id => { myDifficulty = id; saveIdentity(); refreshPickers(); });
+      const blurbs = {
+        normal: 'El juego de siempre.',
+        hard: 'Enemigos con +40% vida y +25% daño, más élites y modificadores, menos curación.',
+        nightmare: 'Enemigos con +90% vida y +50% daño, élites por todas partes, curación rarísima, revivir da poca vida.',
+      };
+      if (difficultyDesc) difficultyDesc.textContent = blurbs[myDifficulty] || '';
     }
   }
   refreshPickers();
@@ -2137,8 +2178,8 @@
     // (nunca inicio, jefe ni extra). Mas probables cuanto mas avanzada la
     // galaxia. Como mucho una fraccion del camino, para que no sea agobiante.
     const normals = roomGrid.flat().filter(r => r && r.type === ROOM_NORMAL);
-    const modChance = clamp(0.18 + (galaxy - 1) * 0.06, 0.18, 0.5);
-    const maxMods = Math.max(1, Math.round(normals.length * 0.45));
+    const modChance = clamp(0.18 + (galaxy - 1) * 0.06 + diff().modBonus, 0.18, 0.65);
+    const maxMods = Math.max(1, Math.round(normals.length * (0.45 + diff().modBonus)));
     let modded = 0;
     for (const r of normals) {
       if (modded >= maxMods) break;
@@ -2213,14 +2254,16 @@
     // Modificador HORDA: el doble de enemigos (la mitad de vida cada uno la
     // pone spawnEnemy leyendo currentRoom.mod).
     if (room.mod === 'horda') count *= 2;
+    count = Math.round(count * diff().count); // dificultad
 
     spawnQueue = [];
     for (let i = 0; i < count; i++) spawnQueue.push({ type: rollEnemyType(isBonus), affix: null });
 
-    // Elites: a partir de la galaxia 2, uno garantizado por sala normal, mas
-    // alguno extra segun la dificultad. Se marca un enemigo ya encolado.
-    if (galaxy >= 2 && spawnQueue.length) {
-      let elites = 1 + (mapRng() < clamp((difficulty - 6) * 0.05, 0, 0.6) ? 1 : 0);
+    // Elites: uno garantizado por sala normal (desde la galaxia que diga la
+    // dificultad), mas alguno extra segun la dificultad y el avance del piso.
+    if (galaxy >= diff().eliteFrom && spawnQueue.length) {
+      let elites = 1 + diff().eliteExtra + (mapRng() < clamp((difficulty - 6) * 0.05, 0, 0.6) ? 1 : 0);
+      elites = Math.min(elites, spawnQueue.length);
       const used = new Set();
       for (let k = 0; k < elites; k++) {
         let idx = Math.floor(srand(0, spawnQueue.length));
@@ -2471,7 +2514,7 @@
     const revividos = [me, ally, ally2].filter(p => p && p.dead);
     for (const p of revividos) {
       p.dead = false;
-      p.hp = Math.round(p.maxHp * 0.5);
+      p.hp = Math.round(p.maxHp * diff().revive);
     }
 
     const start = generateMap();
@@ -2492,6 +2535,7 @@
     return {
       v: GAME_VERSION,
       galaxy, roomsCleared, score, level, credits,
+      difficulty: gameDifficulty,
       cell: currentRoom ? [currentRoom.gx, currentRoom.gy] : [0, 0],
       inBossRoom: !!(currentRoom && currentRoom.type === ROOM_BOSS && currentRoom.cleared),
       // Mascara del mapa: tipo en los 4 bits bajos (& 15), +16 limpiada, +32 visitada.
@@ -2520,6 +2564,7 @@
 
   function startSavedGame(run) {
     currentRole = 'solo';
+    gameDifficulty = DIFFICULTIES[run.difficulty] ? run.difficulty : (DIFFICULTIES[myDifficulty] ? myDifficulty : 'normal');
     spectatorPanel.classList.add('hidden');
     me = makePlayer(LOGICAL_W / 2, LOGICAL_H / 2, run.identity || { name: myName, skin: mySkin, projectile: myProjectile });
     if (run.player) {
@@ -2623,6 +2668,10 @@
   function resetGame(role, meInfo, allyInf, allyInf2) {
     currentRole = role;
     if (role !== 'solo') dailyMode = false; // el reto diario es solo-jugador
+    // Dificultad: la fija quien manda (solo/host). El cliente la recibe en el
+    // mensaje 'start' (ver setupClientDataHandlers) — aqui se pone por defecto.
+    if (role === 'solo' || role === 'host') gameDifficulty = dailyMode ? 'normal' : (DIFFICULTIES[myDifficulty] ? myDifficulty : 'normal');
+    else if (meInfo && DIFFICULTIES[meInfo.difficulty]) gameDifficulty = meInfo.difficulty;
     spectatorPanel.classList.toggle('hidden', role !== 'spectator');
     if (role === 'host' && allyInf) {
       me = makePlayer(LOGICAL_W / 2 - (allyInf2 ? 60 : 40), LOGICAL_H / 2, meInfo);
@@ -2887,7 +2936,7 @@
     const tier = galaxy;                          // un jefe por galaxia
     const type = BOSS_TYPES[forceIndex != null ? forceIndex % BOSS_TYPES.length : (tier - 1) % BOSS_TYPES.length];
     // Mucha mas vida que antes y escalando mas fuerte con cada jefe.
-    const hp = 6000 * Math.pow(1.6, tier - 1) * coopHpScale();
+    const hp = 6000 * Math.pow(1.6, tier - 1) * coopHpScale() * diff().bossHp;
 
     boss = {
       x: LOGICAL_W / 2,
@@ -2930,7 +2979,7 @@
   function spawnMiniBoss() {
     // Tenia demasiada vida y la pelea era muy sosa. Menos vida, mas movil, y
     // acompañado de enemigos normales (ver enterRoom / refuerzos en hostTick).
-    const hp = 6000 * Math.pow(1.6, galaxy - 1) * coopHpScale() * 0.42;
+    const hp = 6000 * Math.pow(1.6, galaxy - 1) * coopHpScale() * 0.42 * diff().bossHp;
     enemies.push({
       id: nextEnemyId++,
       type: 'miniboss',
@@ -3700,11 +3749,11 @@
     const scale = 1 + ((galaxy - 1) * 4 + roomsCleared) * 0.09;
     const isElite = !!(affix && AFFIX_META[affix]);
     // HORDA: mitad de vida por enemigo (el doble de enemigos lo pone
-    // spawnRoomEnemies). Maldicion "plaga": +vida a todos.
+    // spawnRoomEnemies). Maldicion "plaga": +vida a todos. Dificultad: d.hp.
     const hordaMul = (currentRoom && currentRoom.mod === 'horda') ? 0.5 : 1;
-    let hp = base.hp * scale * coopHpScale() * hordaMul * (1 + curseEnemyHp);
+    let hp = base.hp * scale * coopHpScale() * hordaMul * (1 + curseEnemyHp) * diff().hp;
     if (isElite) hp *= 2.4;
-    let speed = base.speed * (1 + ((galaxy - 1) * 4 + roomsCleared) * 0.03);
+    let speed = base.speed * (1 + ((galaxy - 1) * 4 + roomsCleared) * 0.03) * diff().enemySpeed;
     if (affix === 'veloz') speed *= 1.6;
     enemies.push({
       id: nextEnemyId++,
@@ -3787,7 +3836,10 @@
   }
 
   function spawnPickup(x, y) {
-    if (Math.random() < 0.18) pickups.push({ x, y, r: 8, life: 8, heal: 20 });
+    // Dificultad: menos probabilidad de soltar cura y cura mas pequeña.
+    if (Math.random() < 0.18 * diff().heal) {
+      pickups.push({ x, y, r: 8, life: 8, heal: Math.round(20 * Math.max(0.5, diff().heal)) });
+    }
   }
 
   // ---------- player helpers ----------
@@ -3879,6 +3931,7 @@
   function damagePlayer(p, amount) {
     if (p.dead) return;
     if (adminGod && p === me) return; // modo dios del panel de pruebas
+    amount *= diff().dmg; // dificultad: todo el daño recibido por un jugador
     p.hp -= amount;
     p.noShootTimer = 0;        // recibir daño cuenta como "estar en combate"
     roomHitless = false;       // sala "reto": ya no cuenta como perfecta
@@ -3922,9 +3975,10 @@
     sfx('bossDie');
     sfx('bossMusicStop');
     shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 600, life: 1.1, maxLife: 1.1, color: boss.accent });
-    // Recompensa: curacion y experiencia por derrotarlo.
-    for (let k = 0; k < 4; k++) {
-      pickups.push({ x: boss.x + rand(-60, 60), y: boss.y + rand(-60, 60), r: 8, life: 12, heal: 25 });
+    // Recompensa: curacion y experiencia por derrotarlo (menos en dificil).
+    const healDrops = Math.max(1, Math.round(4 * diff().heal));
+    for (let k = 0; k < healDrops; k++) {
+      pickups.push({ x: boss.x + rand(-60, 60), y: boss.y + rand(-60, 60), r: 8, life: 12, heal: Math.round(25 * Math.max(0.5, diff().heal)) });
     }
     // 50% de soltar TAMBIEN una habilidad (laser/meteoro/escudo). Solo una a
     // la vez: si el que la recoge ya tenia otra, la pierde (ver la recogida
@@ -5668,7 +5722,8 @@
     Sound.gameOver();
     bossBar.classList.add('hidden');
     adminHide();
-    let sub = `Puntos: ${score} - galaxia ${galaxy}, ${roomsCleared} salas superadas`;
+    const diffLbl = gameDifficulty !== 'normal' ? `[${diff().label}]  ` : '';
+    let sub = `${diffLbl}Puntos: ${score} - galaxia ${galaxy}, ${roomsCleared} salas superadas`;
     if (currentRole === 'solo') {
       const nuevos = Cloud.onRunEnd({ galaxy, score });
       if (nuevos && nuevos.length) {
@@ -5815,7 +5870,7 @@
         c.once('data', data => {
           if (data.t === 'spectate') { addSpectator(c, data); return; }
           if (data.t !== 'join' || !lobbyOpen) { c.close(); return; }
-          const hostInfoMsg = { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip };
+          const hostInfoMsg = { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip, difficulty: myDifficulty };
           if (!allyInfo) {
             conn = c;
             allyInfo = { name: data.name, skin: data.skin, projectile: data.projectile, ship: data.ship };
@@ -5998,7 +6053,7 @@
 
   startHostedBtn.addEventListener('click', () => {
     lobbyOpen = false;
-    const meInfo = { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip };
+    const meInfo = { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip, difficulty: myDifficulty };
     safeSend({ t: 'start', host: meInfo }, conn);
     if (conn2) safeSend({ t: 'start', host: meInfo }, conn2);
     startGame('host', meInfo, allyInfo, allyInfo2);
@@ -6013,6 +6068,9 @@
         hostInfo = data.host;
         myClientSlot = data.slot || 1;
         setVersionStatus(joinStatus, data.v, '');
+        if (DIFFICULTIES[hostInfo.difficulty] && hostInfo.difficulty !== 'normal' && joinWaitText) {
+          joinWaitText.textContent = 'Esperando a que el host inicie la partida… (dificultad: ' + DIFFICULTIES[hostInfo.difficulty].label + ')';
+        }
         renderPlayerList(joinPlayerList, [
           { name: hostInfo.name, color: SKIN_MAP[hostInfo.skin] ? SKIN_MAP[hostInfo.skin].color : '#3d5afe' },
           { name: effectiveName(), color: SKIN_MAP[mySkin].color },
@@ -6023,7 +6081,9 @@
         renderPlayerList(joinPlayerList, data.players);
       } else if (data.t === 'start') {
         hostInfo = data.host || hostInfo;
-        startGame(myClientSlot === 2 ? 'client2' : 'client', { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip }, hostInfo);
+        // La dificultad la decide el anfitrion; el cliente solo la usa para mostrarla.
+        if (hostInfo && DIFFICULTIES[hostInfo.difficulty]) gameDifficulty = hostInfo.difficulty;
+        startGame(myClientSlot === 2 ? 'client2' : 'client', { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip, difficulty: hostInfo && hostInfo.difficulty }, hostInfo);
       } else if (data.t === 'state') {
         applyState(data);
       }

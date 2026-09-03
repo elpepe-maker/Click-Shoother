@@ -1,7 +1,7 @@
 // Service worker de Click Shooter. Sirve para dos cosas: 1) sin esto el
 // navegador no ofrece "Instalar" (es uno de los requisitos), y 2) de paso
 // deja el juego guardado para poder abrirlo sin conexion.
-const CACHE = 'click-shooter-v10';
+const CACHE = 'click-shooter-v11';
 const ARCHIVOS = ['click-shooter.html', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
