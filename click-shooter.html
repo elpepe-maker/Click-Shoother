@@ -153,6 +153,45 @@
   }
   button.secondary:hover { background: #2d3448; }
   #identity-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 6px 0 20px 0; }
+
+  /* ---------- panel de cuenta ---------- */
+  #account-panel {
+    margin: 14px auto 4px auto;
+    max-width: 380px;
+    background: #12151e;
+    border: 1px solid #2b3242;
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .acc-blurb { margin: 0 0 10px 0; font-size: 12px; color: #9fb3ff; line-height: 1.45; }
+  .acc-fields { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  #acc-user, #acc-pass {
+    font-size: 14px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 2px solid #4a5468;
+    background: #161a24;
+    color: #e8ecf4;
+    width: 150px;
+    text-align: center;
+  }
+  .acc-buttons { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+  .acc-buttons button { padding: 8px 16px; font-size: 13px; }
+  #acc-status { font-size: 12px; min-height: 15px; margin: 8px 0 0 0; color: #ffd23c; line-height: 1.4; }
+  #acc-status.ok { color: #3cff8f; }
+  #account-in { display: flex; align-items: center; justify-content: center; gap: 14px; font-size: 14px; flex-wrap: wrap; }
+  #account-in button { padding: 7px 14px; font-size: 12px; }
+  #acc-name { color: #3cff8f; }
+
+  .swatch.locked {
+    cursor: not-allowed;
+    opacity: 0.55;
+    border-style: dashed;
+  }
+  .swatch.locked:hover { border-color: #3d4560; }
+  #continue-btn { background: #2e7d46; box-shadow: 0 4px 12px rgba(46,125,70,0.4); }
+  #continue-btn:hover { background: #38a057; }
+
   #name-input {
     font-size: 15px;
     padding: 9px 14px;
@@ -556,6 +595,25 @@
           El co-op usa una conexion directa entre los dos, gratis: no hace falta estar en la misma red, solo que cada uno tenga internet.
         </p>
 
+        <div id="account-panel">
+          <div id="account-out">
+            <p class="acc-blurb">Crea una cuenta para <b>guardar tu partida</b> y desbloquear skins. O juega como invitado.</p>
+            <div class="acc-fields">
+              <input id="acc-user" maxlength="16" placeholder="usuario" autocomplete="username" />
+              <input id="acc-pass" type="password" maxlength="64" placeholder="contraseña" autocomplete="current-password" />
+            </div>
+            <div class="acc-buttons">
+              <button id="acc-login-btn" class="secondary">Entrar</button>
+              <button id="acc-register-btn" class="secondary">Crear cuenta</button>
+            </div>
+            <p id="acc-status"></p>
+          </div>
+          <div id="account-in" class="hidden">
+            <span>Sesión de <b id="acc-name"></b></span>
+            <button id="acc-logout-btn" class="secondary">Cerrar sesión</button>
+          </div>
+        </div>
+
         <div id="identity-panel">
           <input id="name-input" maxlength="14" placeholder="Tu nombre" autocomplete="off" />
           <div class="picker-row">
@@ -569,6 +627,7 @@
         </div>
 
         <div id="mode-buttons">
+          <button id="continue-btn" class="hidden">Continuar partida</button>
           <button id="solo-btn">Play Solo</button>
           <button id="host-btn" class="secondary">Host Co-op</button>
           <button id="join-btn" class="secondary">Join Co-op</button>
@@ -621,6 +680,13 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<!-- Firebase (cuentas + guardado en la nube). Si no carga -por estar sin
+     conexion o en un sandbox que lo bloquea, como el Artifact de Claude- el
+     juego sigue funcionando en modo invitado: todo el codigo de cuentas
+     comprueba antes si Firebase existe. -->
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.5/firebase-app-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.5/firebase-auth-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.5/firebase-firestore-compat.js"></script>
 <script>
 (() => {
   const LOGICAL_W = 1280, LOGICAL_H = 720;
@@ -651,6 +717,14 @@
   const spectatePanel = document.getElementById('spectate-panel');
   const spectateInput = document.getElementById('spectate-input');
   const spectateStatus = document.getElementById('spectate-status');
+
+  const accountOut = document.getElementById('account-out');
+  const accountIn = document.getElementById('account-in');
+  const accUserInput = document.getElementById('acc-user');
+  const accPassInput = document.getElementById('acc-pass');
+  const accStatus = document.getElementById('acc-status');
+  const accNameEl = document.getElementById('acc-name');
+  const continueBtn = document.getElementById('continue-btn');
 
   const scoreEl = document.getElementById('score');
   const galaxyEl = document.getElementById('galaxy');
@@ -875,17 +949,263 @@
   const NET_COLOR_INDEX = Object.fromEntries(NET_COLORS.map((c, i) => [c, i]));
   const PROJECTILE_IDS = PROJECTILES.map(p => p.id);
 
+  // ============ CUENTAS + GUARDADO EN LA NUBE (Firebase) ============
+  // La apiKey de una app web de Firebase NO es un secreto (identifica el
+  // proyecto, no autoriza nada): la seguridad esta en las reglas de Firestore
+  // (cada cuenta solo puede leer/escribir su propio documento saves/{uid}).
+  const firebaseConfig = {
+    apiKey: 'AIzaSyDxA7HKdof7-845YCgxlQRExB2CHja3fjc',
+    authDomain: 'click-shooter-19daa.firebaseapp.com',
+    projectId: 'click-shooter-19daa',
+    storageBucket: 'click-shooter-19daa.firebasestorage.app',
+    messagingSenderId: '478772942317',
+    appId: '1:478772942317:web:74e862b38780fa615303e4',
+  };
+
+  function defaultSave() {
+    return {
+      username: '',
+      identity: { name: myName, skin: 'blue', projectile: 'bolt' },
+      unlocks: { skins: [], projectiles: [] },
+      stats: { bestGalaxy: 1, bestScore: 0, bossesKilled: 0, roomsTotal: 0, runs: 0 },
+      savedRun: null,
+    };
+  }
+  function normalizeSave(raw) {
+    const d = defaultSave();
+    const s = raw && typeof raw === 'object' ? raw : {};
+    const un = s.unlocks || {};
+    return {
+      username: s.username || '',
+      identity: Object.assign(d.identity, s.identity || {}),
+      unlocks: {
+        skins: Array.isArray(un.skins) ? un.skins.slice() : [],
+        projectiles: Array.isArray(un.projectiles) ? un.projectiles.slice() : [],
+      },
+      stats: Object.assign(d.stats, s.stats || {}),
+      savedRun: s.savedRun || null,
+    };
+  }
+
+  const Cloud = (() => {
+    let auth = null, db = null, ready = false;
+    let user = null, save = null, writeTimer = null;
+
+    function mirrorKey() { return user ? 'cs_save_' + user.uid : null; }
+    function mirror() {
+      try { if (user && save) localStorage.setItem(mirrorKey(), JSON.stringify(save)); } catch (e) {}
+    }
+    function readMirror() {
+      try { const j = localStorage.getItem(mirrorKey()); return j ? normalizeSave(JSON.parse(j)) : null; }
+      catch (e) { return null; }
+    }
+    function scheduleWrite() {
+      if (!ready || !user || !save) return;
+      mirror();
+      clearTimeout(writeTimer);
+      writeTimer = setTimeout(flushWrite, 1500);
+    }
+    function flushWrite() {
+      clearTimeout(writeTimer);
+      if (!ready || !user || !save) return;
+      mirror();
+      db.collection('saves').doc(user.uid).set(save, { merge: true })
+        .catch(e => console.warn('[cloud] no se pudo guardar:', e && e.code));
+    }
+
+    async function loadSave() {
+      let raw = null, existed = false;
+      try {
+        const doc = await db.collection('saves').doc(user.uid).get();
+        existed = doc.exists;
+        raw = doc.exists ? doc.data() : null;
+      } catch (e) {
+        console.warn('[cloud] lectura fallo, uso copia local:', e && e.code);
+        raw = readMirror();
+        existed = true; // no crear a ciegas si solo fue un fallo de red
+      }
+      if (!raw) raw = readMirror() || defaultSave();
+      save = normalizeSave(raw);
+      if (!existed) flushWrite();
+    }
+
+    function applyIdentityFromSave() {
+      if (!save) return;
+      const id = save.identity || {};
+      if (id.name) { myName = String(id.name).slice(0, 14); nameInput.value = myName; }
+      if (SKIN_MAP[id.skin]) mySkin = id.skin;
+      if (PROJECTILE_MAP[id.projectile]) myProjectile = id.projectile;
+      try {
+        localStorage.setItem('cs_name', myName);
+        localStorage.setItem('cs_skin', mySkin);
+        localStorage.setItem('cs_proj', myProjectile);
+      } catch (e) {}
+    }
+
+    // Concede cualquier cosmetico cuya condicion ya se cumpla. Devuelve los
+    // nombres recien desbloqueados para avisar al jugador.
+    function grantUnlocks() {
+      if (!save) return [];
+      const fresh = [];
+      for (const kind of ['skin', 'projectile']) {
+        const list = kind === 'skin' ? save.unlocks.skins : save.unlocks.projectiles;
+        for (const id in COSMETIC_UNLOCKS[kind]) {
+          if (list.indexOf(id) !== -1) continue;
+          const req = COSMETIC_UNLOCKS[kind][id];
+          if ((save.stats[req.stat] || 0) >= req.need) {
+            list.push(id);
+            const meta = (kind === 'skin' ? SKIN_MAP : PROJECTILE_MAP)[id];
+            fresh.push((kind === 'skin' ? 'skin ' : 'proyectil ') + (meta ? meta.name : id));
+          }
+        }
+      }
+      return fresh;
+    }
+
+    async function onAuth(u) {
+      user = u;
+      if (u) { await loadSave(); applyIdentityFromSave(); }
+      else { save = null; }
+      refreshPickers();
+      renderAccountUI();
+      updateContinueButton();
+    }
+
+    return {
+      save: () => save,
+      user: () => user,
+      enabled: () => ready,
+
+      init() {
+        if (typeof firebase === 'undefined' || !firebase.initializeApp) {
+          console.warn('[cloud] Firebase no cargo — modo invitado');
+          renderAccountUI();
+          return;
+        }
+        try {
+          firebase.initializeApp(firebaseConfig);
+          auth = firebase.auth();
+          db = firebase.firestore();
+          ready = true;
+          auth.onAuthStateChanged(onAuth);
+        } catch (e) {
+          console.warn('[cloud] init fallo', e);
+          renderAccountUI();
+        }
+      },
+
+      emailFor(u) {
+        return String(u).trim().toLowerCase().replace(/[^a-z0-9_]/g, '') + '@users.clickshooter.local';
+      },
+      async register(u, pass) {
+        const clean = String(u).trim();
+        if (!/^[A-Za-z0-9_]{3,16}$/.test(clean)) throw new Error('Usuario: 3-16 letras, números o _');
+        if ((pass || '').length < 6) throw new Error('La contraseña necesita 6 caracteres o más');
+        const cred = await auth.createUserWithEmailAndPassword(this.emailFor(clean), pass);
+        const s = defaultSave();
+        s.username = clean;
+        s.identity = { name: clean, skin: 'blue', projectile: 'bolt' };
+        await db.collection('saves').doc(cred.user.uid).set(s);
+      },
+      async login(u, pass) { await auth.signInWithEmailAndPassword(this.emailFor(u), pass); },
+      async logout() { flushWrite(); await auth.signOut(); },
+
+      syncIdentity() {
+        if (!user || !save) return;
+        save.identity = { name: effectiveName(), skin: mySkin, projectile: myProjectile };
+        scheduleWrite();
+      },
+      setSavedRun(run) {
+        if (!user || !save) return;
+        save.savedRun = run || null;
+        if (run) scheduleWrite(); else flushWrite();
+        updateContinueButton();
+      },
+      getSavedRun() {
+        if (!save || !save.savedRun) return null;
+        if (save.savedRun.v !== GAME_VERSION) return null;
+        return save.savedRun;
+      },
+      bumpRoom() {
+        if (!save) return;
+        save.stats.roomsTotal = (save.stats.roomsTotal || 0) + 1;
+        scheduleWrite();
+      },
+      bumpBossKill() {
+        if (!save) return;
+        save.stats.bossesKilled = (save.stats.bossesKilled || 0) + 1;
+        scheduleWrite();
+      },
+      // Fin de partida: actualiza records, borra el checkpoint, concede
+      // desbloqueos y fuerza el guardado. Devuelve los cosmeticos nuevos.
+      onRunEnd(res) {
+        if (!save) return [];
+        save.stats.runs = (save.stats.runs || 0) + 1;
+        save.stats.bestGalaxy = Math.max(save.stats.bestGalaxy || 1, res.galaxy || 1);
+        save.stats.bestScore = Math.max(save.stats.bestScore || 0, res.score || 0);
+        save.savedRun = null;
+        const fresh = grantUnlocks();
+        flushWrite();
+        updateContinueButton();
+        return fresh;
+      },
+    };
+  })();
+
+  function flashAccStatus(msg, ok) {
+    accStatus.textContent = msg;
+    accStatus.classList.toggle('ok', !!ok);
+  }
+  function renderAccountUI() {
+    const u = Cloud.user();
+    accountOut.classList.toggle('hidden', !!u);
+    accountIn.classList.toggle('hidden', !u);
+    if (u) accNameEl.textContent = (Cloud.save() && Cloud.save().username) || 'jugador';
+  }
+  function updateContinueButton() {
+    const run = Cloud.getSavedRun();
+    continueBtn.classList.toggle('hidden', !run);
+    if (run) continueBtn.textContent = 'Continuar — Galaxia ' + run.galaxy;
+  }
+
+  // ---------- cosmeticos desbloqueables ----------
+  // Estas skins/proyectiles NO se pueden elegir sin cuenta: se ganan jugando
+  // y quedan guardados en la cuenta. El resto (los que no salen aqui) estan
+  // disponibles siempre, con o sin cuenta.
+  const DEFAULT_SKIN = 'blue', DEFAULT_PROJ = 'bolt';
+  const COSMETIC_UNLOCKS = {
+    skin: {
+      white:  { stat: 'bossesKilled', need: 10,    desc: 'Derrota 10 jefes' },
+      amber:  { stat: 'bestGalaxy',   need: 5,     desc: 'Llega a la galaxia 5' },
+      purple: { stat: 'bestScore',    need: 50000, desc: '50 000 puntos en una partida' },
+    },
+    projectile: {
+      star:     { stat: 'roomsTotal',   need: 30, desc: 'Limpia 30 salas en total' },
+      baguette: { stat: 'bossesKilled', need: 3,  desc: 'Derrota 3 jefes' },
+    },
+  };
+  // kind: 'skin' | 'projectile'
+  function cosmeticLock(kind, id) { return COSMETIC_UNLOCKS[kind] && COSMETIC_UNLOCKS[kind][id]; }
+  function isCosmeticUnlocked(kind, id) {
+    if (!cosmeticLock(kind, id)) return true;                 // no es desbloqueable
+    const s = Cloud.save();
+    if (!s) return false;                                     // invitado
+    const list = kind === 'skin' ? s.unlocks.skins : s.unlocks.projectiles;
+    return list.indexOf(id) !== -1;
+  }
+
   // ---------- identity (name / skin / projectile) ----------
   let myName = localStorage.getItem('cs_name') || 'Jugador';
-  let mySkin = localStorage.getItem('cs_skin') || 'blue';
-  let myProjectile = localStorage.getItem('cs_proj') || 'bolt';
-  if (!SKIN_MAP[mySkin]) mySkin = 'blue';
-  if (!PROJECTILE_MAP[myProjectile]) myProjectile = 'bolt';
+  let mySkin = localStorage.getItem('cs_skin') || DEFAULT_SKIN;
+  let myProjectile = localStorage.getItem('cs_proj') || DEFAULT_PROJ;
+  if (!SKIN_MAP[mySkin]) mySkin = DEFAULT_SKIN;
+  if (!PROJECTILE_MAP[myProjectile]) myProjectile = DEFAULT_PROJ;
 
   function saveIdentity() {
     localStorage.setItem('cs_name', myName);
     localStorage.setItem('cs_skin', mySkin);
     localStorage.setItem('cs_proj', myProjectile);
+    Cloud.syncIdentity();
   }
   function effectiveName() {
     const v = (myName || '').trim();
@@ -895,20 +1215,32 @@
   nameInput.value = myName;
   nameInput.addEventListener('input', () => { myName = nameInput.value.slice(0, 14); saveIdentity(); });
 
-  function renderSwatches(container, items, selectedId, onPick) {
+  function renderSwatches(container, items, selectedId, kind, onPick) {
     container.innerHTML = '';
     items.forEach(item => {
+      const locked = !isCosmeticUnlocked(kind, item.id);
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'swatch' + (item.id === selectedId ? ' selected' : '');
-      btn.innerHTML = `<span class="dot" style="background:${item.color}"></span>${item.name}`;
-      btn.addEventListener('click', () => onPick(item.id));
+      btn.className = 'swatch' + (item.id === selectedId ? ' selected' : '') + (locked ? ' locked' : '');
+      btn.innerHTML = `<span class="dot" style="background:${item.color}"></span>${item.name}${locked ? ' 🔒' : ''}`;
+      if (locked) {
+        const info = cosmeticLock(kind, item.id);
+        btn.title = 'Bloqueado — ' + info.desc + (Cloud.save() ? '' : ' (necesitas cuenta)');
+      }
+      btn.addEventListener('click', () => {
+        if (locked) { flashAccStatus('« ' + cosmeticLock(kind, item.id).desc + ' » para usar ' + item.name); return; }
+        onPick(item.id);
+      });
       container.appendChild(btn);
     });
   }
   function refreshPickers() {
-    renderSwatches(skinPicker, SKINS, mySkin, id => { mySkin = id; saveIdentity(); refreshPickers(); });
-    renderSwatches(projectilePicker, PROJECTILES, myProjectile, id => { myProjectile = id; saveIdentity(); refreshPickers(); });
+    // Si el cosmetico elegido ya no esta disponible (cerraste sesion, o venia
+    // de una version vieja sin bloqueos), se vuelve al de por defecto.
+    if (!isCosmeticUnlocked('skin', mySkin)) mySkin = DEFAULT_SKIN;
+    if (!isCosmeticUnlocked('projectile', myProjectile)) myProjectile = DEFAULT_PROJ;
+    renderSwatches(skinPicker, SKINS, mySkin, 'skin', id => { mySkin = id; saveIdentity(); refreshPickers(); });
+    renderSwatches(projectilePicker, PROJECTILES, myProjectile, 'projectile', id => { myProjectile = id; saveIdentity(); refreshPickers(); });
   }
   refreshPickers();
 
@@ -1318,7 +1650,7 @@
   // codigo no sabe leer y salen fallos raros (portales que no se ven, barras
   // vacias...) sin ningun error en pantalla. Se avisa en el lobby.
   // Subir este numero al cambiar lo que viaja en buildSnapshot().
-  const GAME_VERSION = 'salas-7';
+  const GAME_VERSION = 'salas-8';
 
   function sameVersion(theirs) {
     return theirs === GAME_VERSION;
@@ -1626,6 +1958,7 @@
     currentRoom.cleared = true;
     roomsCleared++;
     roomPhase = 'reward';
+    if (currentRole === 'solo') Cloud.bumpRoom();
 
     // Todas las salas dan una mejora; las extra (bonus y miniboss) la dan
     // de mejor calidad en vez de darla por partida doble (ver offerUpgrade).
@@ -1639,6 +1972,7 @@
     currentRoom.cleared = true;
     roomsCleared++;
     roomPhase = 'reward';
+    if (currentRole === 'solo') { Cloud.bumpRoom(); Cloud.bumpBossKill(); }
     pendingUpgrades = 2;
     offerUpgrade();
   }
@@ -1657,6 +1991,7 @@
     } else {
       openPortals();
     }
+    checkpointSave(); // sala limpia y portales abiertos: buen punto de guardado
     return true;
   }
 
@@ -1679,6 +2014,80 @@
     sfx('bossSpawn');
     if (revividos.length) sfx('phaseUp');
     shockwaves.push({ x: LOGICAL_W / 2, y: LOGICAL_H / 2, r: 10, maxR: 700, life: 1.2, maxLife: 1.2, color: '#9fdcff' });
+    checkpointSave(); // nueva galaxia generada: guarda el avance
+  }
+
+  // ---------- guardado de la partida en curso (solo en solitario) ----------
+  // Un "checkpoint" es una foto del estado en un momento seguro: sala ya
+  // limpiada, portales abiertos, sin enemigos ni balas que serializar. Al
+  // continuar, apareces en esa sala tal cual, sin re-pelearla.
+  function serializeRun() {
+    if (currentRole !== 'solo' || !me || me.dead || gameOverFlag) return null;
+    return {
+      v: GAME_VERSION,
+      galaxy, roomsCleared, score, level,
+      cell: currentRoom ? [currentRoom.gx, currentRoom.gy] : [0, 0],
+      inBossRoom: !!(currentRoom && currentRoom.type === ROOM_BOSS && currentRoom.cleared),
+      map: roomGrid.flat().map(r => r ? r.type + (r.cleared ? 8 : 0) + (r.visited ? 16 : 0) : 0),
+      player: {
+        maxHp: me.maxHp, hp: me.hp, speed: me.speed, fireRate: me.fireRate,
+        dmg: me.dmg, shotCount: me.shotCount, spread: me.spread, pierce: me.pierce,
+        bulletSpeed: me.bulletSpeed, bulletLife: me.bulletLife, ability: me.ability,
+      },
+      identity: { name: me.name, skin: mySkin, projectile: myProjectile },
+      savedAt: Date.now(),
+    };
+  }
+  function checkpointSave() {
+    if (currentRole !== 'solo') return;
+    const run = serializeRun();
+    if (run) Cloud.setSavedRun(run);
+  }
+
+  function startSavedGame(run) {
+    currentRole = 'solo';
+    spectatorPanel.classList.add('hidden');
+    me = makePlayer(LOGICAL_W / 2, LOGICAL_H / 2, run.identity || { name: myName, skin: mySkin, projectile: myProjectile });
+    if (run.player) {
+      Object.assign(me, run.player);
+      me.hp = clamp(me.hp, 1, me.maxHp);
+    }
+    ally = null; ally2 = null;
+    bullets = []; enemies = []; particles = []; pickups = [];
+    boss = null; shockwaves = []; beams = []; meteors = []; spawnQueue = [];
+    gameOverFlag = false; clientGameOverShown = false;
+    levelUpState = null;
+    score = run.score || 0;
+    level = run.level || 0;
+    galaxy = run.galaxy || 1;
+    roomsCleared = run.roomsCleared || 0;
+    pendingUpgrades = 0;
+    portals = [];
+    galaxyPortal = null;
+    portalCooldown = 0.7;
+    remoteInput = { mx: 0, my: 0, aimAngle: 0, shooting: false };
+    remoteInput2 = { mx: 0, my: 0, aimAngle: 0, shooting: false };
+    netSendTimer = 0;
+
+    roomGrid = Array.from({ length: GRID }, (_, gy) =>
+      Array.from({ length: GRID }, (_, gx) => {
+        const code = (run.map && run.map[gy * GRID + gx]) || 0;
+        if (!code) return null;
+        return { gx, gy, type: code & 7, cleared: (code & 8) !== 0, visited: (code & 16) !== 0 };
+      }));
+    const cell = run.cell || [0, 0];
+    currentRoom = roomAt(cell[0], cell[1]) || roomGrid.flat().find(Boolean);
+    if (currentRoom) { currentRoom.cleared = true; currentRoom.visited = true; }
+    roomPhase = 'open';
+    if (run.inBossRoom) galaxyPortal = { x: LOGICAL_W / 2, y: LOGICAL_H / 2, r: 62 };
+    else openPortals();
+
+    overlay.classList.add('hidden');
+    updateHud();
+    updateBossHud();
+    running = true;
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
   }
 
   function updatePortals(dt, activePlayers) {
@@ -4132,7 +4541,15 @@
     running = false;
     Sound.gameOver();
     bossBar.classList.add('hidden');
-    gameoverSub.textContent = `Puntos: ${score} - galaxia ${galaxy}, ${roomsCleared} salas superadas`;
+    let sub = `Puntos: ${score} - galaxia ${galaxy}, ${roomsCleared} salas superadas`;
+    if (currentRole === 'solo') {
+      const nuevos = Cloud.onRunEnd({ galaxy, score });
+      if (nuevos && nuevos.length) {
+        sub += `  ·  ¡Desbloqueado: ${nuevos.join(', ')}!`;
+        refreshPickers();
+      }
+    }
+    gameoverSub.textContent = sub;
     menuPanel.classList.add('hidden');
     gameoverPanel.classList.remove('hidden');
     overlay.classList.remove('hidden');
@@ -4149,8 +4566,48 @@
   // ---------- lobby / networking wiring ----------
   document.getElementById('solo-btn').addEventListener('click', () => {
     saveIdentity();
+    Cloud.setSavedRun(null); // "Play Solo" empieza de cero; el checkpoint viejo se descarta
     startGame('solo', { name: effectiveName(), skin: mySkin, projectile: myProjectile }, null);
   });
+
+  continueBtn.addEventListener('click', () => {
+    const run = Cloud.getSavedRun();
+    if (!run) { updateContinueButton(); return; }
+    saveIdentity();
+    startSavedGame(run);
+  });
+
+  // ---------- cuentas ----------
+  function authErrorMsg(e) {
+    const c = (e && e.code) || '';
+    if (c === 'auth/email-already-in-use') return 'Ese usuario ya existe. Prueba a Entrar.';
+    if (c === 'auth/invalid-credential' || c === 'auth/wrong-password' || c === 'auth/user-not-found')
+      return 'Usuario o contraseña incorrectos.';
+    if (c === 'auth/weak-password') return 'Contraseña demasiado corta (mínimo 6).';
+    if (c === 'auth/network-request-failed') return 'Sin conexión. Inténtalo más tarde.';
+    if (c === 'auth/too-many-requests') return 'Demasiados intentos. Espera un poco.';
+    if (c === 'auth/invalid-email') return 'Ese usuario no vale (usa solo letras, números y _).';
+    return (e && e.message) || 'No se pudo completar.';
+  }
+  async function accAuth(mode) {
+    if (!Cloud.enabled()) { flashAccStatus('Las cuentas necesitan conexión (Firebase no cargó).'); return; }
+    const u = accUserInput.value, p = accPassInput.value;
+    flashAccStatus(mode === 'register' ? 'Creando cuenta…' : 'Entrando…');
+    try {
+      if (mode === 'register') { await Cloud.register(u, p); flashAccStatus('¡Cuenta creada! Sesión iniciada.', true); }
+      else { await Cloud.login(u, p); flashAccStatus('¡Hola de nuevo!', true); }
+      accPassInput.value = '';
+    } catch (e) {
+      flashAccStatus(authErrorMsg(e));
+    }
+  }
+  document.getElementById('acc-login-btn').addEventListener('click', () => accAuth('login'));
+  document.getElementById('acc-register-btn').addEventListener('click', () => accAuth('register'));
+  document.getElementById('acc-logout-btn').addEventListener('click', async () => {
+    try { await Cloud.logout(); flashAccStatus('Sesión cerrada.', true); }
+    catch (e) { flashAccStatus('No se pudo cerrar sesión.'); }
+  });
+  accPassInput.addEventListener('keydown', e => { if (e.key === 'Enter') accAuth('login'); });
 
   document.getElementById('playagain-btn').addEventListener('click', () => location.reload());
   leaveBtn.addEventListener('click', () => { if (confirm('Leave the current match?')) location.reload(); });
@@ -4408,6 +4865,13 @@
     });
     conn.on('close', () => { running = false; alert('Se perdió la conexión con el host.'); });
   }
+
+  // Arranca Firebase (cuentas + guardado). Si no esta disponible, el juego
+  // sigue en modo invitado. Se guarda un ultimo checkpoint al cerrar.
+  Cloud.init();
+  window.addEventListener('beforeunload', () => {
+    if (currentRole === 'solo' && running && !gameOverFlag) checkpointSave();
+  });
 })();
 
 // Registro del service worker, fuera del IIFE del juego (no le hace falta
