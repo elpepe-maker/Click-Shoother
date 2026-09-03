@@ -1930,6 +1930,7 @@
   let netSendTimer = 0;
   let lastShownLevelUpId = 0;
   let lastBannerRoomKey = ''; // cliente: para disparar el aviso de sala al cambiar
+  let bannerShownRooms = new Set(); // cliente: salas cuyo aviso ya se mostro (no repetir al retroceder)
   let myUpgradeSent = false;
   let clientGameOverShown = false;
   // Interruptores del panel de pruebas (cuenta admin). Todos empiezan
@@ -2234,6 +2235,10 @@
   }
 
   function enterRoom(room, fromDir) {
+    // Primera vez que se pisa esta sala: el aviso, el reloj del contrarreloj y
+    // el reto "sin daño" solo cuentan en la pelea inicial, no al volver a una
+    // sala ya limpiada (si no, el banner sale otra vez y el reloj revive).
+    const firstVisit = !room.cleared;
     currentRoom = room;
     room.visited = true;
 
@@ -2253,8 +2258,8 @@
     debris = [];
     portalCooldown = 0.7;
     minibossReinforce = 0;
-    roomHitless = (room.mod === 'reto');
-    roomTimer = (room.mod === 'contrarreloj')
+    roomHitless = (firstVisit && room.mod === 'reto');
+    roomTimer = (firstVisit && room.mod === 'contrarreloj')
       ? Math.max(14, 26 - ((galaxy - 1) * 4 + roomsCleared) * 0.4) : 0;
 
     // Modificador SALA MALDITA: −vida maxima al entrar (una sola vez por sala).
@@ -2267,10 +2272,12 @@
       }
     }
 
-    // Aviso al entrar: modificador de sala, o el tipo de sala especial.
-    if (room.type === ROOM_SHOP) showRoomBanner('TIENDA', '#7cf0ff');
-    else if (room.type === ROOM_DEAL) showRoomBanner('SALA DE PACTOS', '#c9a0ff');
-    else if (room.mod && ROOM_MODS[room.mod]) showRoomBanner(ROOM_MODS[room.mod].label, ROOM_MODS[room.mod].color, ROOM_MODS[room.mod].blurb);
+    // Aviso al entrar (solo la primera vez): modificador o sala especial.
+    if (firstVisit) {
+      if (room.type === ROOM_SHOP) showRoomBanner('TIENDA', '#7cf0ff');
+      else if (room.type === ROOM_DEAL) showRoomBanner('SALA DE PACTOS', '#c9a0ff');
+      else if (room.mod && ROOM_MODS[room.mod]) showRoomBanner(ROOM_MODS[room.mod].label, ROOM_MODS[room.mod].color, ROOM_MODS[room.mod].blurb);
+    }
 
     // Aparecer por el lado contrario al portal usado, como en Isaac.
     const entry = fromDir
@@ -2648,6 +2655,8 @@
     roomBanner = null;
     roomHitless = false;
     roomTimer = 0;
+    lastBannerRoomKey = '';
+    bannerShownRooms = new Set();
     spawnQueue = [];
     gameOverFlag = false;
     level = 0;
@@ -4772,16 +4781,20 @@
     }
     currentRoom = s.cur ? roomAt(s.cur[0], s.cur[1]) : null;
 
-    // Aviso de sala en el cliente: se dispara al detectar cambio de sala
-    // (no viaja por red, se deriva del mapa que ya llega).
+    // Aviso de sala en el cliente: se dispara al ENTRAR por primera vez en una
+    // sala (no viaja por red, se deriva del mapa que ya llega). Se recuerda por
+    // celda para que no vuelva a salir al retroceder a una sala ya vista.
     const rk = currentRoom ? currentRoom.gx + ',' + currentRoom.gy + '@' + galaxy : '';
     if (rk && rk !== lastBannerRoomKey) {
       lastBannerRoomKey = rk;
-      if (currentRoom.type === ROOM_SHOP) showRoomBanner('TIENDA', '#7cf0ff');
-      else if (currentRoom.type === ROOM_DEAL) showRoomBanner('SALA DE PACTOS', '#c9a0ff');
-      else if (currentRoom.mod && ROOM_MODS[currentRoom.mod]) {
-        const m = ROOM_MODS[currentRoom.mod];
-        showRoomBanner(m.label, m.color, m.blurb);
+      if (!bannerShownRooms.has(rk)) {
+        bannerShownRooms.add(rk);
+        if (currentRoom.type === ROOM_SHOP) showRoomBanner('TIENDA', '#7cf0ff');
+        else if (currentRoom.type === ROOM_DEAL) showRoomBanner('SALA DE PACTOS', '#c9a0ff');
+        else if (currentRoom.mod && ROOM_MODS[currentRoom.mod]) {
+          const m = ROOM_MODS[currentRoom.mod];
+          showRoomBanner(m.label, m.color, m.blurb);
+        }
       }
     }
 
