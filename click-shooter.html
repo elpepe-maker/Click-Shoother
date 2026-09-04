@@ -1576,18 +1576,55 @@
   // Todo el sonido esta sintetizado con Web Audio: ni un solo archivo externo,
   // asi el juego sigue siendo un unico .html que funciona sin conexion.
   const Sound = (() => {
-    let ctx = null, master = null, noiseBuffer = null;
+    let ctx = null, master = null, noiseBuffer = null, reverbSend = null;
     let muted = localStorage.getItem('cs_muted') === '1';
     const lastPlayed = {};
+
+    // Impulso de reverb generado a mano (ruido con caida exponencial), sin
+    // archivo externo: el juego sigue siendo un unico .html.
+    function makeImpulse(duration, decay) {
+      const len = Math.floor(ctx.sampleRate * duration);
+      const impulse = ctx.createBuffer(2, len, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const data = impulse.getChannelData(ch);
+        for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+      }
+      return impulse;
+    }
 
     function init() {
       if (ctx) return;
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
       ctx = new AC();
+
+      // Bus maestro: compresor al final para pegar el sonido y que una
+      // explosion grande no sature cuando se acumulan varios efectos a la
+      // vez (habitual en oleadas y peleas de jefe).
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -18;
+      compressor.knee.value = 24;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.25;
+      compressor.connect(ctx.destination);
+
       master = ctx.createGain();
       master.gain.value = 0.32;
-      master.connect(ctx.destination);
+      master.connect(compressor);
+
+      // Envio de reverb corta: solo la usan a proposito los efectos grandes
+      // (explosiones, jefe) via la opcion `space`, para no emborronar los
+      // disparos rapidos con cola.
+      reverbSend = ctx.createGain();
+      reverbSend.gain.value = 1;
+      const convolver = ctx.createConvolver();
+      convolver.buffer = makeImpulse(1.6, 2.2);
+      const reverbReturn = ctx.createGain();
+      reverbReturn.gain.value = 0.5;
+      reverbSend.connect(convolver);
+      convolver.connect(reverbReturn);
+      reverbReturn.connect(compressor);
 
       // Ruido blanco reutilizable para explosiones e impactos.
       const len = ctx.sampleRate * 2;
@@ -1610,26 +1647,54 @@
       return false;
     }
 
+    // Manda una copia de `node` al bus de reverb con el volumen `amount`
+    // (0-1). Solo lo piden a proposito los efectos grandes (space > 0): la
+    // cola de reverb emborronaria disparos rapidos si sonara siempre.
+    function sendToSpace(node, amount) {
+      if (!(amount > 0) || !reverbSend) return;
+      const send = ctx.createGain();
+      send.gain.value = amount;
+      node.connect(send);
+      send.connect(reverbSend);
+    }
+
     function tone(opts) {
       if (!ready()) return;
       const {
         type = 'sine', f0, f1 = null, dur = 0.15,
         peak = 0.3, delay = 0, attack = 0.005,
+        rich = false,   // capa extra desafinada unos cents: engorda el sonido
+        warmth = null,  // Hz de corte de un filtro paso-bajo final, para suavizar
+        space = 0,      // 0-1: cuanto se manda a la reverb corta
       } = opts;
       const t0 = ctx.currentTime + delay;
-
-      const osc = ctx.createOscillator();
-      osc.type = type;
-      osc.frequency.setValueAtTime(Math.max(1, f0), t0);
-      if (f1 !== null) osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
 
       const gain = ctx.createGain();
       gain.gain.setValueAtTime(0.0001, t0);
       gain.gain.linearRampToValueAtTime(peak, t0 + attack);
       gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
-      osc.connect(gain); gain.connect(master);
-      osc.start(t0); osc.stop(t0 + dur + 0.05);
+      let out = gain;
+      if (warmth) {
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = warmth;
+        gain.connect(lp);
+        out = lp;
+      }
+      out.connect(master);
+      sendToSpace(out, space);
+
+      const detunes = rich ? [0, -9, 9] : [0];
+      for (const det of detunes) {
+        const osc = ctx.createOscillator();
+        osc.type = type;
+        osc.detune.value = det;
+        osc.frequency.setValueAtTime(Math.max(1, f0), t0);
+        if (f1 !== null) osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
+        osc.connect(gain);
+        osc.start(t0); osc.stop(t0 + dur + 0.05);
+      }
     }
 
     function noise(opts) {
@@ -1637,6 +1702,7 @@
       const {
         dur = 0.2, peak = 0.3, delay = 0,
         freq = 1400, freqTo = null, q = 1, filter = 'lowpass',
+        space = 0, // 0-1: cuanto se manda a la reverb corta
       } = opts;
       const t0 = ctx.currentTime + delay;
 
@@ -1656,6 +1722,7 @@
       gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
       src.connect(biquad); biquad.connect(gain); gain.connect(master);
+      sendToSpace(gain, space);
       src.start(t0); src.stop(t0 + dur + 0.05);
     }
 
@@ -1679,7 +1746,13 @@
       else if (idx % 8 === 4) tone({ type: 'sine', f0: 52, dur: 0.16, peak: 0.16 }); // y en el tercero
       // Cada dos vueltas del patron, un acorde tenso para que no suene plano.
       if (idx % 16 === 12) {
-        [246.94, 293.66, 349.23].forEach(f => tone({ type: 'sawtooth', f0: f, dur: 0.45, peak: 0.06 }));
+        [246.94, 293.66, 349.23].forEach(f => tone({ type: 'sawtooth', f0: f, dur: 0.45, peak: 0.06, rich: true, space: 0.35 }));
+      }
+      // Un hilo melodico suave cada cuatro pasos, para que la pista no sea
+      // solo bajo+percusion durante peleas largas.
+      if (idx % 4 === 2) {
+        const lead = BOSS_MUSIC_BASS[(idx / 4 | 0) % BOSS_MUSIC_BASS.length] * 4;
+        tone({ type: 'triangle', f0: lead, dur: BOSS_MUSIC_STEP * 1.6, peak: 0.05, warmth: 2200, space: 0.3 });
       }
     }
 
@@ -1695,7 +1768,8 @@
       shoot(style) {
         if (throttled('shoot', 45)) return;
         const base = { bolt: 720, laser: 980, orb: 460, star: 840 }[style] || 720;
-        tone({ type: 'square', f0: base, f1: base * 0.45, dur: 0.07, peak: 0.11 });
+        tone({ type: 'square', f0: base, f1: base * 0.45, dur: 0.07, peak: 0.1, rich: true, warmth: 4200 });
+        noise({ dur: 0.02, peak: 0.05, freq: 7500, filter: 'highpass' }); // click de boca de cañon
       },
       hit() {
         if (throttled('hit', 35)) return;
@@ -1703,12 +1777,13 @@
       },
       enemyDie() {
         if (throttled('enemyDie', 40)) return;
-        tone({ type: 'sawtooth', f0: 340, f1: 70, dur: 0.2, peak: 0.16 });
+        tone({ type: 'sawtooth', f0: 340, f1: 70, dur: 0.2, peak: 0.15, rich: true, space: 0.15 });
         noise({ dur: 0.16, peak: 0.12, freq: 1500, freqTo: 300 });
       },
       bomberExplode() {
-        noise({ dur: 0.34, peak: 0.26, freq: 1000, freqTo: 120 });
-        tone({ type: 'sawtooth', f0: 190, f1: 45, dur: 0.3, peak: 0.2 });
+        noise({ dur: 0.34, peak: 0.26, freq: 1000, freqTo: 120, space: 0.3 });
+        tone({ type: 'sawtooth', f0: 190, f1: 45, dur: 0.3, peak: 0.2, rich: true });
+        tone({ type: 'sine', f0: 60, f1: 28, dur: 0.28, peak: 0.22 }); // sub-golpe grave
       },
       hurt() {
         if (throttled('hurt', 260)) return;
@@ -1718,19 +1793,20 @@
       pickup() {
         tone({ type: 'sine', f0: 660, dur: 0.09, peak: 0.2 });
         tone({ type: 'sine', f0: 990, dur: 0.12, peak: 0.18, delay: 0.07 });
+        tone({ type: 'sine', f0: 1320, dur: 0.14, peak: 0.1, delay: 0.13, space: 0.2 });
       },
       levelUp() {
         [523, 659, 784, 1047].forEach((f, i) =>
-          tone({ type: 'triangle', f0: f, dur: 0.26, peak: 0.2, delay: i * 0.075 }));
+          tone({ type: 'triangle', f0: f, dur: 0.26, peak: 0.19, delay: i * 0.075, rich: true, space: 0.25 }));
       },
       wave() {
         tone({ type: 'triangle', f0: 392, dur: 0.16, peak: 0.16 });
         tone({ type: 'triangle', f0: 587, dur: 0.22, peak: 0.16, delay: 0.13 });
       },
       bossSpawn() {
-        tone({ type: 'sawtooth', f0: 55, f1: 120, dur: 1.5, peak: 0.3, attack: 0.25 });
-        tone({ type: 'square', f0: 110, f1: 220, dur: 1.2, peak: 0.14, delay: 0.15 });
-        noise({ dur: 1.4, peak: 0.2, freq: 200, freqTo: 2200 });
+        tone({ type: 'sawtooth', f0: 55, f1: 120, dur: 1.5, peak: 0.3, attack: 0.25, rich: true, space: 0.4 });
+        tone({ type: 'square', f0: 110, f1: 220, dur: 1.2, peak: 0.14, delay: 0.15, warmth: 3000 });
+        noise({ dur: 1.4, peak: 0.2, freq: 200, freqTo: 2200, space: 0.3 });
       },
       // El guard de "ya esta sonando" evita duplicar el bucle si el evento
       // llegara dos veces (por ejemplo, un paquete de red repetido).
@@ -1749,7 +1825,7 @@
         tone({ type: 'square', f0: 900, f1: 500, dur: 0.05, peak: 0.09 });
       },
       slam() {
-        tone({ type: 'sine', f0: 150, f1: 32, dur: 0.55, peak: 0.4 });
+        tone({ type: 'sine', f0: 150, f1: 32, dur: 0.55, peak: 0.4, space: 0.25 });
         noise({ dur: 0.45, peak: 0.32, freq: 900, freqTo: 90 });
       },
       telegraph() {
@@ -1776,22 +1852,22 @@
         tone({ type: 'sine', f0: 120, f1: 40, dur: 0.32, peak: 0.24 });
       },
       phaseUp() {
-        tone({ type: 'sawtooth', f0: 160, f1: 640, dur: 0.9, peak: 0.3, attack: 0.05 });
+        tone({ type: 'sawtooth', f0: 160, f1: 640, dur: 0.9, peak: 0.3, attack: 0.05, rich: true, space: 0.3 });
         noise({ dur: 0.8, peak: 0.24, freq: 500, freqTo: 3000 });
       },
       bossDie() {
-        noise({ dur: 2.0, peak: 0.42, freq: 1800, freqTo: 60 });
-        tone({ type: 'sawtooth', f0: 300, f1: 30, dur: 1.8, peak: 0.32 });
+        noise({ dur: 2.0, peak: 0.42, freq: 1800, freqTo: 60, space: 0.4 });
+        tone({ type: 'sawtooth', f0: 300, f1: 30, dur: 1.8, peak: 0.3, rich: true });
         [660, 523, 392, 262].forEach((f, i) =>
-          tone({ type: 'triangle', f0: f, dur: 0.4, peak: 0.18, delay: 0.9 + i * 0.13 }));
+          tone({ type: 'triangle', f0: f, dur: 0.4, peak: 0.17, delay: 0.9 + i * 0.13, rich: true, space: 0.35 }));
       },
       gameOver() {
         [440, 349, 262, 196].forEach((f, i) =>
-          tone({ type: 'triangle', f0: f, dur: 0.5, peak: 0.24, delay: i * 0.18 }));
+          tone({ type: 'triangle', f0: f, dur: 0.5, peak: 0.22, delay: i * 0.18, warmth: 2600, space: 0.3 }));
       },
       abilityGet() {
-        tone({ type: 'triangle', f0: 500, f1: 950, dur: 0.18, peak: 0.22 });
-        tone({ type: 'sine', f0: 1300, dur: 0.16, peak: 0.16, delay: 0.09 });
+        tone({ type: 'triangle', f0: 500, f1: 950, dur: 0.18, peak: 0.22, rich: true });
+        tone({ type: 'sine', f0: 1300, dur: 0.16, peak: 0.16, delay: 0.09, space: 0.2 });
       },
       shieldBlock() {
         if (throttled('shieldBlock', 60)) return;
@@ -1904,6 +1980,7 @@
     if (bullets.length > MAX_BULLETS) bullets.splice(0, bullets.length - MAX_BULLETS);
     if (particles.length > MAX_PARTICLES) particles.splice(0, particles.length - MAX_PARTICLES);
     if (enemies.length > MAX_ENEMIES) enemies.splice(0, enemies.length - MAX_ENEMIES);
+    if (floatingTexts.length > MAX_FLOATING_TEXTS) floatingTexts.splice(0, floatingTexts.length - MAX_FLOATING_TEXTS);
   }
 
   // ---------- version del juego ----------
@@ -1995,6 +2072,14 @@
   let beams = [];         // rayos laser activos
   let meteors = [];       // zonas de impacto marcadas en el suelo
   let nextEnemyId = 1;    // id estable para poder interpolar en el cliente
+
+  // ---------- efectos visuales puramente locales ----------
+  // Nada de esto viaja por red: cada maquina (anfitrion, companero,
+  // espectador) los dispara por su cuenta a partir de lo que ya ve, asi
+  // que no hace falta tocar buildSnapshot/applyState ni GAME_VERSION.
+  let shakeTrauma = 0;     // sacudida de camara (0-1), decae sola cada frame
+  let floatingTexts = [];  // numeros de daño / texto flotante
+  const MAX_FLOATING_TEXTS = 60;
 
   // ---------- mapa de salas ----------
   const GRID = 6;
@@ -2289,6 +2374,8 @@
     bullets = [];
     enemies = [];
     particles = [];
+    floatingTexts = [];
+    shakeTrauma = 0;
     pickups = [];
     beams = [];
     meteors = [];
@@ -2573,7 +2660,7 @@
     }
     ally = null; ally2 = null;
     dailyMode = false; mapRng = Math.random;
-    bullets = []; enemies = []; particles = []; pickups = [];
+    bullets = []; enemies = []; particles = []; pickups = []; floatingTexts = []; shakeTrauma = 0;
     boss = null; shockwaves = []; beams = []; meteors = []; spawnQueue = [];
     pods = []; debris = []; roomBanner = null; roomHitless = false; roomTimer = 0;
     // Maldiciones "plaga" acumuladas en la partida guardada.
@@ -2691,6 +2778,8 @@
     bullets = [];
     enemies = [];
     particles = [];
+    floatingTexts = [];
+    shakeTrauma = 0;
     pickups = [];
     boss = null;
     shockwaves = [];
@@ -3073,6 +3162,7 @@
         }
         shockwaves.push({ x: e.x, y: e.y, r: 10, maxR: radius * 1.4, life: 0.4, maxLife: 0.4, color: e.color });
         spawnParticles(e.x, e.y, e.color, 16);
+        addShake(0.25);
         sfx('slam');
         e.state = 'chase';
         e.stateTimer = rand(1.1, 1.6);
@@ -3208,6 +3298,7 @@
     }
     shockwaves.push({ x: boss.x, y: boss.y, r: boss.r, maxR: 420, life: 0.5, maxLife: 0.5, color: boss.accent });
     spawnParticles(boss.x, boss.y, boss.accent, 26);
+    addShake(0.3);
     sfx('slam');
   }
 
@@ -3248,12 +3339,14 @@
       boss.speed *= 1.3;
       shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 380, life: 0.8, maxLife: 0.8, color: '#ffffff' });
       spawnParticles(boss.x, boss.y, '#ffffff', 30);
+      addShake(0.45);
       sfx('phaseUp');
     } else if (boss.phase === 2 && boss.hp <= boss.maxHp * 0.3) {
       boss.phase = 3;
       boss.speed *= 1.35;
       shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 520, life: 1.0, maxLife: 1.0, color: '#ffd700' });
       spawnParticles(boss.x, boss.y, '#ffd700', 45);
+      addShake(0.55);
       sfx('phaseUp');
     }
 
@@ -3407,6 +3500,7 @@
           bossFireBullet(boss.x, boss.y, a, 165 + step * 45, 6, 8);
         }
         shockwaves.push({ x: boss.x, y: boss.y, r: boss.r, maxR: 260, life: 0.35, maxLife: 0.35, color: boss.accent });
+        addShake(0.18);
         sfx('slam');
       }
       if (boss.stateTimer <= 0) {
@@ -3517,6 +3611,8 @@
       if (!b.friendly) continue;
       if (dist(b.x, b.y, boss.x, boss.y) < boss.r + b.r) {
         boss.hp -= b.dmg;
+        boss.flash = 1;
+        addShake(0.035);
         spawnParticles(b.x, b.y, boss.accent, 3);
         sfx('bossHit');
         if (b.pierce > 0) b.pierce--; else bullets.splice(j, 1);
@@ -3790,6 +3886,7 @@
     }
     spawnParticles(e.x, e.y, '#ff7b1a', 22);
     shockwaves.push({ x: e.x, y: e.y, r: 6, maxR: 120, life: 0.35, maxLife: 0.35, color: '#ff7b1a' });
+    addShake(0.22);
     sfx('bomberExplode');
   }
 
@@ -3800,6 +3897,7 @@
   function explodeKamikaze(e) {
     spawnParticles(e.x, e.y, e.color, 18);
     shockwaves.push({ x: e.x, y: e.y, r: 6, maxR: 90, life: 0.3, maxLife: 0.3, color: e.color });
+    addShake(0.22);
     sfx('bomberExplode');
   }
 
@@ -3831,8 +3929,80 @@
     for (let i = 0; i < count; i++) {
       const a = rand(0, Math.PI * 2);
       const spd = rand(40, 180);
-      particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life: rand(0.25, 0.5), maxLife: 0.5, color });
+      const life = rand(0.25, 0.5);
+      particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life, maxLife: life, color, r: rand(1.5, 3.2) });
     }
+  }
+
+  // ---------- sacudida de camara ----------
+  // Puramente visual y local (no viaja por red): cada trauma se suma con
+  // tope 1 y decae solo, cuadraticamente, en updateVisualFx (asi un golpe
+  // fuerte se nota de golpe y se apaga rapido, no como una rampa lineal).
+  function addShake(amount) { shakeTrauma = Math.min(1, shakeTrauma + amount); }
+
+  // Numero/texto flotante que sube y se desvanece (daño, curacion...).
+  function spawnFloatingText(x, y, text, color, size) {
+    floatingTexts.push({ x, y, text, color, size: size || 15, life: 0.7, maxLife: 0.7, vy: -50 });
+  }
+
+  // ---------- efectos de golpe por diferencia de estado (companero/espectador) ----------
+  // La simulacion (y por tanto spawnParticles/addShake/flash de un golpe) solo
+  // corre en hostTick, que solo se ejecuta en el anfitrion: sin esto, quien
+  // se une como companero o mira como espectador jugaba viendo chispazos y
+  // sacudida solo en la pantalla del anfitrion. Como el hp de antes y de
+  // despues de cada snapshot ya llega por red, comparar los dos aqui basta
+  // para recrear el mismo efecto en cualquier maquina sin tocar el paquete.
+  function noteEnemyHit(e, oldHp) {
+    if (oldHp == null || !(e.hp < oldHp - 0.5)) return;
+    e.flash = 1;
+    addShake(0.015);
+    spawnParticles(e.x, e.y, e.color, 4);
+  }
+
+  function noteBossHit(b, oldHp) {
+    if (oldHp == null || !(b.hp < oldHp - 0.5)) return;
+    b.flash = 1;
+    addShake(0.035);
+    spawnParticles(b.x, b.y, b.accent, 3);
+  }
+
+  function notePlayerHurt(p, oldHp, isMe) {
+    if (oldHp == null || !(p.hp < oldHp - 0.5)) return;
+    p.hurtFlash = 1;
+    addShake(isMe ? 0.16 : 0.06);
+    spawnFloatingText(p.x, p.y - p.r - 6, '-' + Math.round(oldHp - p.hp), '#ff5a5a', 16);
+  }
+
+  // Fisica de los efectos puramente visuales: se llama UNA vez por fotograma
+  // desde loop(), da igual el rol (host/cliente/espectador), porque estos
+  // efectos nunca viajan por red — cada maquina los dispara y los anima por
+  // su cuenta a partir de lo que ve. Antes esto vivia dentro de hostTick, asi
+  // que companero y espectador nunca veian particulas ni sacudida de camara.
+  function updateVisualFx(dt) {
+    shakeTrauma = Math.max(0, shakeTrauma - dt * 2.4);
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.92; p.vy *= 0.92;
+      p.life -= dt;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    for (let i = floatingTexts.length - 1; i >= 0; i--) {
+      const ft = floatingTexts[i];
+      ft.y += ft.vy * dt;
+      ft.vy *= 0.9; // frena al subir, no sale disparado en linea recta
+      ft.life -= dt;
+      if (ft.life <= 0) floatingTexts.splice(i, 1);
+    }
+
+    for (const e of enemies) { if (e.flash > 0) e.flash = Math.max(0, e.flash - dt * 6); }
+    if (boss && boss.flash > 0) boss.flash = Math.max(0, boss.flash - dt * 6);
+    for (const p of [me, ally, ally2]) { if (p && p.hurtFlash > 0) p.hurtFlash = Math.max(0, p.hurtFlash - dt * 3.5); }
+
+    if (particles.length > MAX_PARTICLES) particles.splice(0, particles.length - MAX_PARTICLES);
+    if (floatingTexts.length > MAX_FLOATING_TEXTS) floatingTexts.splice(0, floatingTexts.length - MAX_FLOATING_TEXTS);
   }
 
   function spawnPickup(x, y) {
@@ -3935,8 +4105,11 @@
     p.hp -= amount;
     p.noShootTimer = 0;        // recibir daño cuenta como "estar en combate"
     roomHitless = false;       // sala "reto": ya no cuenta como perfecta
+    p.hurtFlash = 1;
+    addShake(p === me ? 0.16 : 0.06); // se nota mas cuando te toca a ti
+    spawnFloatingText(p.x, p.y - p.r - 6, '-' + Math.round(amount), '#ff5a5a', 16);
     sfx('hurt');
-    if (p.hp <= 0) { p.hp = 0; p.dead = true; }
+    if (p.hp <= 0) { p.hp = 0; p.dead = true; addShake(0.3); }
   }
 
   function nearestAlive(x, y, activePlayers) {
@@ -3975,6 +4148,7 @@
     sfx('bossDie');
     sfx('bossMusicStop');
     shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 600, life: 1.1, maxLife: 1.1, color: boss.accent });
+    addShake(0.85);
     // Recompensa: curacion y experiencia por derrotarlo (menos en dificil).
     const healDrops = Math.max(1, Math.round(4 * diff().heal));
     for (let k = 0; k < healDrops; k++) {
@@ -4000,6 +4174,7 @@
   function killEnemy(e) {
     score += e.scoreVal;
     spawnParticles(e.x, e.y, e.color, e.affix ? 22 : 14);
+    addShake(e.type === 'miniboss' ? 0.3 : 0.04);
     spawnPickup(e.x, e.y);
     dropCredits(e.x, e.y, e.type === 'miniboss' ? 80 + galaxy * 15 : creditValue(e.scoreVal, !!e.affix));
     if (e.explodes) explodeBomber(e); else sfx('enemyDie');
@@ -4355,7 +4530,10 @@
             sfx('shieldBlock');
           } else {
             e.hp -= b.dmg;
+            e.flash = 1;
+            addShake(0.015);
             spawnParticles(b.x, b.y, e.color, 4);
+            spawnFloatingText(b.x, b.y - e.r, Math.round(b.dmg).toString(), '#ffe066', 12);
             sfx('hit');
           }
           if (b.pierce > 0) b.pierce--; else bullets.splice(j, 1);
@@ -4388,15 +4566,6 @@
           break;
         }
       }
-    }
-
-    // particles
-    for (let i = particles.length - 1; i >= 0; i--) {
-      const p = particles[i];
-      p.x += p.vx * dt; p.y += p.vy * dt;
-      p.vx *= 0.92; p.vy *= 0.92;
-      p.life -= dt;
-      if (p.life <= 0) particles.splice(i, 1);
     }
 
     // pickups
@@ -4662,7 +4831,11 @@
     if (currentRole === 'spectator') {
       if (hostMe) {
         if (!me) me = { ...hostMe };
-        else Object.assign(me, hostMe, { x: me.x, y: me.y });
+        else {
+          const oldHp = me.hp;
+          Object.assign(me, hostMe, { x: me.x, y: me.y });
+          notePlayerHurt(me, oldHp, false);
+        }
         me.tx = hostMe.x;
         me.ty = hostMe.y;
       } else {
@@ -4680,6 +4853,7 @@
           me.x += (hostMe.x - me.x) * 0.2;
           me.y += (hostMe.y - me.y) * 0.2;
         }
+        const oldHp = me.hp;
         me.hp = hostMe.hp;
         me.maxHp = hostMe.maxHp;
         me.dead = hostMe.dead;
@@ -4698,13 +4872,18 @@
         me.ricochet = hostMe.ricochet;
         me.backshot = hostMe.backshot;
         me.ship = hostMe.ship;
+        notePlayerHurt(me, oldHp, true);
       }
     }
 
     // ---- Companero: se guarda como objetivo y se desliza en clientTick ----
     if (s.me) {
       if (!ally) ally = { ...s.me };
-      else Object.assign(ally, s.me, { x: ally.x, y: ally.y });
+      else {
+        const oldHp = ally.hp;
+        Object.assign(ally, s.me, { x: ally.x, y: ally.y });
+        notePlayerHurt(ally, oldHp, false);
+      }
       ally.tx = s.me.x;
       ally.ty = s.me.y;
     } else {
@@ -4719,7 +4898,11 @@
       const otherSource = currentRole === 'client2' ? s.ally : s.ally2;
       if (otherSource) {
         if (!ally2) ally2 = { ...otherSource };
-        else Object.assign(ally2, otherSource, { x: ally2.x, y: ally2.y });
+        else {
+          const oldHp = ally2.hp;
+          Object.assign(ally2, otherSource, { x: ally2.x, y: ally2.y });
+          notePlayerHurt(ally2, oldHp, false);
+        }
         ally2.tx = otherSource.x;
         ally2.ty = otherSource.y;
       } else {
@@ -4731,9 +4914,11 @@
     if (s.en) {
       const previous = new Map(enemies.map(e => [e.id, e]));
       const rebuilt = [];
+      const newIds = new Set();
       for (let i = 0; i < s.en.length; i += 9) {
         const id = s.en[i];
         const existing = previous.get(id);
+        const oldHp = existing ? existing.hp : null;
         const enemy = existing || { id, x: s.en[i + 1], y: s.en[i + 2] };
         enemy.tx = s.en[i + 1];
         enemy.ty = s.en[i + 2];
@@ -4743,7 +4928,20 @@
         enemy.color = NET_COLORS[s.en[i + 6]] || NET_COLORS[0];
         enemy.telegraph = s.en[i + 7];
         enemy.affix = AFFIX_IDS[s.en[i + 8] - 1] || null;
+        noteEnemyHit(enemy, oldHp);
         rebuilt.push(enemy);
+        newIds.add(id);
+      }
+      // Enemigos que estaban y ya no estan: se dieron por muertos (el
+      // anfitrion no manda un evento aparte, se deriva de que desaparezcan).
+      // El array de red no lleva el tipo, asi que aqui no se distingue
+      // miniboss de un enemigo normal: sacudida uniforme, algo mas floja que
+      // la que ve el propio anfitrion en killEnemy() para ese caso.
+      for (const [id, old] of previous) {
+        if (!newIds.has(id)) {
+          spawnParticles(old.x, old.y, old.color, old.affix ? 22 : 14);
+          addShake(0.06);
+        }
       }
       enemies = rebuilt;
     }
@@ -4804,8 +5002,10 @@
         boss.x = previousBoss.x;
         boss.y = previousBoss.y;
         boss.spin = previousBoss.spin;
+        noteBossHit(boss, previousBoss.hp);
       }
     } else {
+      if (boss) { spawnParticles(boss.x, boss.y, boss.color, 60); addShake(0.85); } // jefe derrotado
       boss = null;
     }
 
@@ -4982,6 +5182,27 @@
   }
 
   function drawShip(p, ang) {
+    // Estela del motor: se deriva de cuanto se ha movido en pantalla desde el
+    // fotograma anterior, no de leer el input — asi funciona igual para la
+    // nave propia, la de un companero (que en el cliente solo se desliza
+    // hacia su objetivo de red) o la que ve un espectador.
+    if (p._prevX !== undefined) {
+      const moved = dist(p.x, p.y, p._prevX, p._prevY);
+      p._thrusterT = (p._thrusterT || 0) - 0.016;
+      if (moved > 1.2 && p._thrusterT <= 0) {
+        p._thrusterT = 0.035;
+        const back = ang + Math.PI;
+        const bx = p.x + Math.cos(back) * (p.r * 0.7), by = p.y + Math.sin(back) * (p.r * 0.7);
+        particles.push({
+          x: bx, y: by,
+          vx: Math.cos(back) * rand(20, 55) + rand(-15, 15),
+          vy: Math.sin(back) * rand(20, 55) + rand(-15, 15),
+          life: 0.22, maxLife: 0.22, color: p.color, r: rand(1.5, 3),
+        });
+      }
+    }
+    p._prevX = p.x; p._prevY = p.y;
+
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(ang);
@@ -4995,6 +5216,12 @@
     ctx.lineTo(-12, -10);
     ctx.closePath();
     ctx.fill();
+    // Destello al recibir daño (p.hurtFlash, decae en updateVisualFx).
+    if (p.hurtFlash > 0) {
+      ctx.globalAlpha = p.hurtFlash * 0.8;
+      ctx.fillStyle = '#ff4d4d';
+      ctx.fill();
+    }
     ctx.restore();
 
     if (p.name) {
@@ -5075,7 +5302,10 @@
     ctx.fillStyle = th.star;
     for (const st of bgStars) {
       const y = (st.y + t * st.d * 18) % canvas.height;
-      ctx.globalAlpha = 0.25 + st.d;
+      // Parpadeo suave: fase derivada de su propia posicion, asi cada estrella
+      // titila a su ritmo sin necesitar guardar un campo extra por estrella.
+      const twinkle = 0.75 + 0.25 * Math.sin(t * 2.2 + st.x * 0.37 + st.y * 0.19);
+      ctx.globalAlpha = (0.25 + st.d) * twinkle;
       ctx.beginPath(); ctx.arc(st.x, y, st.s, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
@@ -5083,6 +5313,16 @@
 
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Sacudida de camara: se aplica solo al mundo de juego (no al minimapa,
+    // banners ni viñetas de HUD, que se dibujan fuera de este save/restore
+    // mas abajo, o son elementos DOM aparte).
+    const shakeAmt = shakeTrauma * shakeTrauma;
+    const shakeX = (Math.random() * 2 - 1) * 16 * shakeAmt;
+    const shakeY = (Math.random() * 2 - 1) * 16 * shakeAmt;
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
     drawBackground();
     drawGrid();
 
@@ -5136,13 +5376,34 @@
 
     for (const p of particles) {
       ctx.save();
-      ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
+      const t = clamp(p.life / p.maxLife, 0, 1);
+      ctx.globalAlpha = t;
       ctx.fillStyle = p.color;
-      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 6 * t;
+      ctx.beginPath(); ctx.arc(p.x, p.y, (p.r || 3) * (0.5 + t * 0.5), 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
 
     for (const b of bullets) {
+      // Estela corta hacia atras (opuesto a la velocidad): puramente visual,
+      // no cambia colision ni red — mismo dato (b.vx/vy) que ya viaja.
+      const spd = Math.hypot(b.vx, b.vy);
+      if (spd > 1) {
+        const col = b.friendly ? (b.color || '#bde8ff') : (b.color || '#ff9a3c');
+        const tx = b.x - (b.vx / spd) * (b.r * 3.2 + 6);
+        const ty = b.y - (b.vy / spd) * (b.r * 3.2 + 6);
+        const grad = ctx.createLinearGradient(b.x, b.y, tx, ty);
+        grad.addColorStop(0, col);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.save();
+        ctx.globalAlpha = 0.45;
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = Math.max(1.5, b.r * 0.9);
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(tx, ty); ctx.stroke();
+        ctx.restore();
+      }
       if (!b.friendly) {
         // Casi todo el fuego enemigo es naranja generico; el orbe grande (y
         // sus tres hijos) llevan el color del jefe para distinguirse.
@@ -5186,8 +5447,28 @@
         ctx.restore();
       }
 
+      // Cuerpo con un brillo superior-izquierdo (da volumen sin tener que
+      // parsear/aclarar el color de cada tipo de enemigo) + contorno fino +
+      // destello blanco al recibir un golpe (e.flash, decae en updateVisualFx).
+      ctx.save();
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
       ctx.fillStyle = e.color;
-      ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fill();
+      const hi = ctx.createRadialGradient(e.x - e.r * 0.35, e.y - e.r * 0.35, 0, e.x - e.r * 0.35, e.y - e.r * 0.35, e.r * 1.1);
+      hi.addColorStop(0, 'rgba(255,255,255,0.4)');
+      hi.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = hi;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.stroke();
+      if (e.flash > 0) {
+        ctx.globalAlpha = e.flash * 0.85;
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+      }
+      ctx.restore();
+
       const w = e.r * 2;
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(e.x - w / 2, e.y - e.r - 10, w, 4);
@@ -5212,9 +5493,47 @@
       drawChargeFor(me, myAim);
     }
 
+    drawFloatingTexts();
+    ctx.restore(); // fin de la sacudida de camara
+
+    drawLowHpVignette();
     drawRoomOverlay();
     drawMinimap();
     drawRoomBanner();
+  }
+
+  // Numeros/texto flotante (daño recibido, etc.): dentro del mundo con
+  // sacudida, para que se sientan parte del golpe y no del HUD.
+  function drawFloatingTexts() {
+    for (const ft of floatingTexts) {
+      ctx.save();
+      const t = clamp(ft.life / ft.maxLife, 0, 1);
+      ctx.globalAlpha = t;
+      ctx.fillStyle = ft.color;
+      ctx.font = 'bold ' + ft.size + 'px Segoe UI, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+      ctx.fillText(ft.text, ft.x, ft.y);
+      ctx.restore();
+    }
+  }
+
+  // Viñeta roja que late cuando la vida propia esta baja: aviso claro sin
+  // depender de mirar el numero del HUD. Fuera del save/restore de la
+  // sacudida (el aviso en si no debe temblar, o es mas dificil de leer).
+  function drawLowHpVignette() {
+    if (!me || me.dead || !(me.hp / me.maxHp < 0.3)) return;
+    const t = 1 - me.hp / me.maxHp / 0.3; // 0 al entrar en zona roja, 1 a punto de morir
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
+    const g = ctx.createRadialGradient(
+      canvas.width / 2, canvas.height / 2, canvas.height * 0.28,
+      canvas.width / 2, canvas.height / 2, canvas.height * 0.75);
+    g.addColorStop(0, 'rgba(255,20,20,0)');
+    g.addColorStop(1, 'rgba(255,20,20,' + (0.15 + t * 0.35 + pulse * 0.12) + ')');
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
   }
 
   // Drones orbitando (transformacion). El angulo se deriva del tiempo, igual
@@ -5656,6 +5975,14 @@
     ctx.arc(0, 0, boss.r, 0, Math.PI * 2);
     ctx.fill();
 
+    // Destello al recibir un impacto (boss.flash, decae en updateVisualFx).
+    if (boss.flash > 0) {
+      ctx.globalAlpha = boss.flash * 0.7;
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
     // Nucleo interior claro, mas intenso en fase 2.
     ctx.shadowBlur = 20;
     ctx.fillStyle = boss.phase === 2 ? '#ffffff' : boss.accent;
@@ -5693,6 +6020,7 @@
       if (currentRole === 'client' || currentRole === 'client2') clientTick(dt);
       else if (currentRole === 'spectator') spectatorTick(dt);
       else hostTick(dt);
+      updateVisualFx(dt);
       draw();
     } catch (err) {
       showCrash(err);
