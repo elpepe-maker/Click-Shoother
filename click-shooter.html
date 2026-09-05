@@ -622,7 +622,7 @@
         <div id="ally2-bar-outer" style="display:none;"><div id="ally2-bar-inner"></div></div>
         <div id="ability-bar-outer" style="display:none;"><div id="ability-bar-inner"></div><span id="ability-bar-label"></span></div>
       </div>
-      <button id="leave-btn">Leave</button>
+      <button id="leave-btn">Salir</button>
       <div id="mute-indicator">🔊 Sonido (M)</div>
     </div>
 
@@ -647,12 +647,12 @@
       </div>
       <div id="spec-spawn-row">
         <span class="picker-label">Invocar</span>
-        <button type="button" class="spec-spawn-btn" data-type="grunt">Grunt</button>
-        <button type="button" class="spec-spawn-btn" data-type="fast">Fast</button>
-        <button type="button" class="spec-spawn-btn" data-type="shooter">Shooter</button>
-        <button type="button" class="spec-spawn-btn" data-type="tank">Tank</button>
-        <button type="button" class="spec-spawn-btn" data-type="bomber">Bomber</button>
-        <button type="button" class="spec-spawn-btn" data-type="sniper">Sniper</button>
+        <button type="button" class="spec-spawn-btn" data-type="grunt">Soldado</button>
+        <button type="button" class="spec-spawn-btn" data-type="fast">Veloz</button>
+        <button type="button" class="spec-spawn-btn" data-type="shooter">Tirador</button>
+        <button type="button" class="spec-spawn-btn" data-type="tank">Tanque</button>
+        <button type="button" class="spec-spawn-btn" data-type="bomber">Bombardero</button>
+        <button type="button" class="spec-spawn-btn" data-type="sniper">Francotirador</button>
       </div>
     </div>
 
@@ -720,10 +720,10 @@
 
         <div id="mode-buttons">
           <button id="continue-btn" class="hidden">Continuar partida</button>
-          <button id="solo-btn">Play Solo</button>
+          <button id="solo-btn">Jugar Solo</button>
           <button id="daily-btn" class="secondary">Reto diario</button>
-          <button id="host-btn" class="secondary">Host Co-op</button>
-          <button id="join-btn" class="secondary">Join Co-op</button>
+          <button id="host-btn" class="secondary">Alojar Co-op</button>
+          <button id="join-btn" class="secondary">Unirse a Co-op</button>
           <button id="spectate-btn" class="secondary hidden">Ver partida</button>
         </div>
         <div id="host-panel" class="mp-sub hidden">
@@ -757,16 +757,16 @@
         </div>
       </div>
       <div id="gameover-panel" class="hidden">
-        <h1>GAME OVER</h1>
+        <h1>FIN DE LA PARTIDA</h1>
         <h2 id="gameover-sub"></h2>
         <div id="daily-board" class="hidden" style="margin:8px auto 12px;max-width:340px;font-size:13px;text-align:left;"></div>
-        <button id="playagain-btn">Play Again</button>
+        <button id="playagain-btn">Jugar de nuevo</button>
       </div>
     </div>
 
     <div id="levelup-overlay" class="hidden">
-      <h1>LEVEL UP!</h1>
-      <h2>Choose an upgrade</h2>
+      <h1>¡MEJORA!</h1>
+      <h2>Elige una mejora</h2>
       <div id="levelup-choices"></div>
       <p id="levelup-status"></p>
     </div>
@@ -867,6 +867,10 @@
     // La embestida aqui rebota una vez en la pared antes de frenar.
     { name: 'OJO CARMESI', color: '#ff2d78', accent: '#ffd166', abilities: ['charge', 'laser', 'summon', 'homing', 'crossbeam'] },
     { name: 'COLOSO DE HIERRO', color: '#ff8c1a', accent: '#ffe066', abilities: ['slam', 'laser', 'summon', 'spiral', 'charge', 'nova', 'homing', 'meteor', 'crossbeam'] },
+    // Quinto jefe: pozo de gravedad que tira de los jugadores hacia el
+    // nucleo antes de estallar. Unico jefe que empuja al jugador en vez de
+    // solo dispararle (ver bossStartAbility/updateBoss, caso 'gravityWell').
+    { name: 'TEJEDOR DE VACIO', color: '#2a1440', accent: '#7ee8ff', abilities: ['gravityWell', 'homing', 'crossbeam', 'nova'] },
   ];
 
   const ABILITY_LABEL = {
@@ -880,6 +884,7 @@
     meteor: 'LLUVIA DE METEOROS',
     crossbeam: 'RAYOS GIRATORIOS',
     megaOrb: 'ORBES EXPLOSIVOS',
+    gravityWell: 'POZO DE GRAVEDAD',
   };
 
   // ---------- mejoras y rarezas ----------
@@ -969,45 +974,45 @@
   // legendaria y exotica son las que de verdad cambian la partida.
   const UPGRADE_POOL = [
     // ---- comun (gris): un empujoncito, no cambia la partida ----
-    { name: 'Quick Trigger', rarity: 'common', desc: '+6% fire rate', apply: mulFireRate(0.94) },
-    { name: 'Sharpened Rounds', rarity: 'common', desc: '+2 damage per shot', apply: addDmg(2) },
-    { name: 'Light Boots', rarity: 'common', desc: '+4% move speed', apply: mulSpeed(1.04) },
-    { name: 'Bandage', rarity: 'common', desc: '+8 max HP, full heal', apply: addMaxHp(8) },
-    { name: 'Field Medkit', rarity: 'common', desc: 'Instantly heal 30 HP', apply: p => { p.hp = clamp(p.hp + 30, 0, p.maxHp); } },
+    { name: 'Gatillo Rápido', rarity: 'common', desc: '+6% cadencia de disparo', apply: mulFireRate(0.94) },
+    { name: 'Balas Afiladas', rarity: 'common', desc: '+2 de daño por disparo', apply: addDmg(2) },
+    { name: 'Botas Ligeras', rarity: 'common', desc: '+4% velocidad de movimiento', apply: mulSpeed(1.04) },
+    { name: 'Vendaje', rarity: 'common', desc: '+8 de vida máxima, cura completa', apply: addMaxHp(8) },
+    { name: 'Botiquín de Campaña', rarity: 'common', desc: 'Cura 30 de vida al instante', apply: p => { p.hp = clamp(p.hp + 30, 0, p.maxHp); } },
     // ---- raro (azul): ya se nota, pero no define la partida ----
-    { name: 'Rapid Fire', rarity: 'rare', desc: '+12% fire rate', apply: mulFireRate(0.88) },
-    { name: 'Heavy Rounds', rarity: 'rare', desc: '+5 damage per shot', apply: addDmg(5) },
-    { name: 'Swift Legs', rarity: 'rare', desc: '+9% move speed', apply: mulSpeed(1.09) },
-    { name: 'Vitality', rarity: 'rare', desc: '+18 max HP, full heal', apply: addMaxHp(18) },
-    { name: 'Light Powder', rarity: 'rare', desc: '+14% bullet speed', apply: mulBulletSpeed(1.14) },
-    { name: 'Extended Clip', rarity: 'rare', desc: '+14% bullet range', apply: mulBulletLife(1.14) },
+    { name: 'Fuego Rápido', rarity: 'rare', desc: '+12% cadencia de disparo', apply: mulFireRate(0.88) },
+    { name: 'Balas Pesadas', rarity: 'rare', desc: '+5 de daño por disparo', apply: addDmg(5) },
+    { name: 'Piernas Veloces', rarity: 'rare', desc: '+9% velocidad de movimiento', apply: mulSpeed(1.09) },
+    { name: 'Vitalidad', rarity: 'rare', desc: '+18 de vida máxima, cura completa', apply: addMaxHp(18) },
+    { name: 'Pólvora Ligera', rarity: 'rare', desc: '+14% velocidad de bala', apply: mulBulletSpeed(1.14) },
+    { name: 'Cargador Extendido', rarity: 'rare', desc: '+14% alcance de bala', apply: mulBulletLife(1.14) },
     // ---- epico (morado): el estandar, lo que se espera de una buena mejora ----
-    { name: 'Twin Fire', rarity: 'epic', desc: '+20% fire rate', apply: mulFireRate(0.8) },
-    { name: 'Overcharged Rounds', rarity: 'epic', desc: '+10 damage per shot', apply: addDmg(10) },
-    { name: "Sprinter's Boots", rarity: 'epic', desc: '+16% move speed', apply: mulSpeed(1.16) },
-    { name: 'Field Rations', rarity: 'epic', desc: '+30 max HP, full heal', apply: addMaxHp(30) },
-    { name: 'Accelerator Core', rarity: 'epic', desc: '+24% bullet speed', apply: mulBulletSpeed(1.24) },
-    { name: 'Long Barrel', rarity: 'epic', desc: '+24% bullet range', apply: mulBulletLife(1.24) },
-    { name: 'Multishot', rarity: 'epic', desc: '+1 projectile per shot', apply: addShotCount(1) },
-    { name: 'Armor Piercing', rarity: 'epic', desc: 'Bullets pierce 1 more enemy', apply: addPierce(1) },
+    { name: 'Fuego Gemelo', rarity: 'epic', desc: '+20% cadencia de disparo', apply: mulFireRate(0.8) },
+    { name: 'Balas Sobrecargadas', rarity: 'epic', desc: '+10 de daño por disparo', apply: addDmg(10) },
+    { name: 'Botas de Velocista', rarity: 'epic', desc: '+16% velocidad de movimiento', apply: mulSpeed(1.16) },
+    { name: 'Raciones de Campaña', rarity: 'epic', desc: '+30 de vida máxima, cura completa', apply: addMaxHp(30) },
+    { name: 'Núcleo Acelerador', rarity: 'epic', desc: '+24% velocidad de bala', apply: mulBulletSpeed(1.24) },
+    { name: 'Cañón Largo', rarity: 'epic', desc: '+24% alcance de bala', apply: mulBulletLife(1.24) },
+    { name: 'Multidisparo', rarity: 'epic', desc: '+1 proyectil por disparo', apply: addShotCount(1) },
+    { name: 'Balas Perforantes', rarity: 'epic', desc: 'Las balas atraviesan 1 enemigo más', apply: addPierce(1) },
     // ---- legendario (amarillo): cambia como juegas ----
-    { name: 'Adrenal Trigger', rarity: 'legendary', desc: '+30% fire rate', apply: mulFireRate(0.7) },
-    { name: 'Devastator Rounds', rarity: 'legendary', desc: '+18 damage per shot', apply: addDmg(18) },
-    { name: 'Adrenal Sprint', rarity: 'legendary', desc: '+24% move speed', apply: mulSpeed(1.24) },
-    { name: 'Iron Constitution', rarity: 'legendary', desc: '+45 max HP, full heal', apply: addMaxHp(45) },
-    { name: 'Hypervelocity Core', rarity: 'legendary', desc: '+34% bullet speed', apply: mulBulletSpeed(1.34) },
-    { name: 'Sniper Barrel', rarity: 'legendary', desc: '+34% bullet range', apply: mulBulletLife(1.34) },
-    { name: 'Twin Cannon', rarity: 'legendary', desc: '+2 projectiles per shot', apply: addShotCount(2) },
-    { name: 'Depleted Rounds', rarity: 'legendary', desc: 'Bullets pierce 2 more enemies', apply: addPierce(2) },
+    { name: 'Gatillo Adrenalínico', rarity: 'legendary', desc: '+30% cadencia de disparo', apply: mulFireRate(0.7) },
+    { name: 'Balas Devastadoras', rarity: 'legendary', desc: '+18 de daño por disparo', apply: addDmg(18) },
+    { name: 'Sprint Adrenalínico', rarity: 'legendary', desc: '+24% velocidad de movimiento', apply: mulSpeed(1.24) },
+    { name: 'Constitución de Hierro', rarity: 'legendary', desc: '+45 de vida máxima, cura completa', apply: addMaxHp(45) },
+    { name: 'Núcleo de Hipervelocidad', rarity: 'legendary', desc: '+34% velocidad de bala', apply: mulBulletSpeed(1.34) },
+    { name: 'Cañón de Francotirador', rarity: 'legendary', desc: '+34% alcance de bala', apply: mulBulletLife(1.34) },
+    { name: 'Cañón Doble', rarity: 'legendary', desc: '+2 proyectiles por disparo', apply: addShotCount(2) },
+    { name: 'Balas de Núcleo Duro', rarity: 'legendary', desc: 'Las balas atraviesan 2 enemigos más', apply: addPierce(2) },
     // ---- exotico (arcoiris): lo mas fuerte que existe, y sigue siendo UNA cosa ----
-    { name: 'Hyperfire Core', rarity: 'exotic', desc: '+42% fire rate', apply: mulFireRate(0.58) },
-    { name: 'Annihilator Rounds', rarity: 'exotic', desc: '+28 damage per shot', apply: addDmg(28) },
-    { name: 'Phase Runners', rarity: 'exotic', desc: '+34% move speed', apply: mulSpeed(1.34) },
-    { name: "Titan's Blood", rarity: 'exotic', desc: '+65 max HP, full heal', apply: addMaxHp(65) },
-    { name: 'Relativistic Core', rarity: 'exotic', desc: '+48% bullet speed', apply: mulBulletSpeed(1.48) },
-    { name: 'Railgun Barrel', rarity: 'exotic', desc: '+48% bullet range', apply: mulBulletLife(1.48) },
-    { name: 'Triple Cannon', rarity: 'exotic', desc: '+3 projectiles per shot', apply: addShotCount(3) },
-    { name: 'Tungsten Core', rarity: 'exotic', desc: 'Bullets pierce 3 more enemies', apply: addPierce(3) },
+    { name: 'Núcleo Hiperveloz', rarity: 'exotic', desc: '+42% cadencia de disparo', apply: mulFireRate(0.58) },
+    { name: 'Balas Aniquiladoras', rarity: 'exotic', desc: '+28 de daño por disparo', apply: addDmg(28) },
+    { name: 'Corredores de Fase', rarity: 'exotic', desc: '+34% velocidad de movimiento', apply: mulSpeed(1.34) },
+    { name: 'Sangre de Titán', rarity: 'exotic', desc: '+65 de vida máxima, cura completa', apply: addMaxHp(65) },
+    { name: 'Núcleo Relativista', rarity: 'exotic', desc: '+48% velocidad de bala', apply: mulBulletSpeed(1.48) },
+    { name: 'Cañón de Riel', rarity: 'exotic', desc: '+48% alcance de bala', apply: mulBulletLife(1.48) },
+    { name: 'Cañón Triple', rarity: 'exotic', desc: '+3 proyectiles por disparo', apply: addShotCount(3) },
+    { name: 'Núcleo de Tungsteno', rarity: 'exotic', desc: 'Las balas atraviesan 3 enemigos más', apply: addPierce(3) },
     // ---- transformaciones: cambian COMO disparas, no solo los numeros ----
     { name: 'Dron de combate', rarity: 'legendary', desc: 'Un dron que orbita y dispara solo (máx 2)',
       apply: p => { p.drones = Math.min(2, (p.drones || 0) + 1); } },
@@ -1064,7 +1069,8 @@
     { id: 'vanguard', name: 'Vanguardia', color: '#9fdcff', desc: 'Equilibrada. Sin pasivo.', base: {}, passive: null },
     { id: 'fortress', name: 'Fortaleza', color: '#8b9fd6', desc: 'Lenta y dura. Regenera vida fuera de combate.',
       base: { maxHp: 150, hp: 150, speed: 220, fireRate: 0.17 }, passive: 'regen' },
-    { id: 'needle', name: 'Aguja', color: '#ff6a9c', desc: 'Cristal: mucho daño y cadencia, poca vida.',
+    { id: 'needle', name: 'Aguja', color: '#ff6a9c',
+      desc: 'Cristal: mucho daño y cadencia, poca vida. Cuanto mas aguantas sin que te toquen, mas daño hace (hasta +50%) — un golpe lo reinicia.',
       base: { maxHp: 70, hp: 70, dmg: 14, fireRate: 0.11, speed: 285 }, passive: 'glass' },
     { id: 'twin', name: 'Gemela', color: '#7cffb0', desc: 'Empieza con un dron de combate.',
       base: { drones: 1 }, passive: null },
@@ -1989,7 +1995,7 @@
   // codigo no sabe leer y salen fallos raros (portales que no se ven, barras
   // vacias...) sin ningun error en pantalla. Se avisa en el lobby.
   // Subir este numero al cambiar lo que viaja en buildSnapshot().
-  const GAME_VERSION = 'salas-10';
+  const GAME_VERSION = 'salas-11';
 
   function sameVersion(theirs) {
     return theirs === GAME_VERSION;
@@ -2539,7 +2545,9 @@
     currentRoom.cleared = true;
     roomsCleared++;
     roomPhase = 'reward';
-    if (currentRole === 'solo') Cloud.bumpRoom();
+    // El reto diario no debe tocar las stats/desbloqueos del perfil normal,
+    // solo su propio marcador (ver submitDaily en showGameOver).
+    if (currentRole === 'solo' && !dailyMode) Cloud.bumpRoom();
 
     // Modificador RETO: si nadie recibio daño, una mejora extra.
     if (currentRoom.mod === 'reto' && roomHitless) {
@@ -2565,7 +2573,7 @@
     currentRoom.cleared = true;
     roomsCleared++;
     roomPhase = 'reward';
-    if (currentRole === 'solo') { Cloud.bumpRoom(); Cloud.bumpBossKill(); }
+    if (currentRole === 'solo' && !dailyMode) { Cloud.bumpRoom(); Cloud.bumpBossKill(); }
     pendingUpgrades = 2;
     offerUpgrade();
   }
@@ -2745,6 +2753,7 @@
       // Nave elegida: aplica sus overrides encima de los valores de arriba.
       ship: SHIP_MAP[info.ship] ? info.ship : DEFAULT_SHIP,
       noShootTimer: 0, // tiempo desde el ultimo disparo (pasivo "regen")
+      hitFreeTimer: 0, // tiempo desde el ultimo golpe recibido (pasivo "glass")
     };
     const ship = SHIP_MAP[p.ship];
     if (ship && ship.base) Object.assign(p, ship.base);
@@ -3243,6 +3252,9 @@
       sfx('laserFire');
     } else if (name === 'megaOrb') {
       boss.stateTimer = 1.2;    // telegrafia antes de soltar la salva de orbes
+    } else if (name === 'gravityWell') {
+      boss.stateTimer = 0.9;    // telegrafia; luego el tiron (ver updateBoss)
+      boss.gravity = { phase: 'telegraph' };
     }
   }
 
@@ -3591,6 +3603,61 @@
       }
     }
 
+    // Pozo de gravedad (jefe 5): telegrafia -> tiron de ~2s hacia el nucleo
+    // (empuja la posicion del jugador directamente, no es dano) -> colapso
+    // final con dano de cerca y un anillo de metralla. Es el unico jefe que
+    // desplaza al jugador en vez de solo dispararle.
+    else if (boss.state === 'gravityWell') {
+      const G = boss.gravity;
+      if (G.phase === 'telegraph') {
+        boss.telegraph = 1 - clamp(boss.stateTimer / 0.9, 0, 1);
+        if (boss.stateTimer <= 0) {
+          G.phase = 'pull';
+          boss.telegraph = 0;
+          boss.stateTimer = 2.0;
+          sfx('whoosh');
+        }
+      } else if (G.phase === 'pull') {
+        // El tiron crece segun avanza, para que valga la pena luchar por
+        // alejarse pronto en vez de esperar al ultimo momento.
+        const elapsed = 2.0 - boss.stateTimer;
+        const pullStrength = 85 + elapsed * 55;
+        for (const p of activePlayers) {
+          if (p.dead) continue;
+          const dx = boss.x - p.x, dy = boss.y - p.y;
+          const d = Math.hypot(dx, dy) || 1;
+          if (d < 460) {
+            p.x = clamp(p.x + (dx / d) * pullStrength * dt, p.r, LOGICAL_W - p.r);
+            p.y = clamp(p.y + (dy / d) * pullStrength * dt, p.r, LOGICAL_H - p.r);
+          }
+        }
+        // Chispas siendo succionadas hacia el nucleo, puramente decorativo.
+        if (Math.random() < dt * 14) {
+          const a = rand(0, Math.PI * 2), d0 = rand(160, 400);
+          particles.push({
+            x: boss.x + Math.cos(a) * d0, y: boss.y + Math.sin(a) * d0,
+            vx: -Math.cos(a) * 150, vy: -Math.sin(a) * 150,
+            life: 0.5, maxLife: 0.5, color: boss.accent, r: rand(1.5, 3),
+          });
+        }
+        if (boss.stateTimer <= 0) {
+          G.phase = 'collapse';
+          for (const p of activePlayers) {
+            if (p.dead) continue;
+            if (dist(boss.x, boss.y, p.x, p.y) < 130) damagePlayer(p, 24);
+          }
+          const count = 24 + boss.tier * 3;
+          for (let i = 0; i < count; i++) bossFireBullet(boss.x, boss.y, (i / count) * Math.PI * 2, 260, 7, 10);
+          shockwaves.push({ x: boss.x, y: boss.y, r: 10, maxR: 300, life: 0.4, maxLife: 0.4, color: boss.accent });
+          spawnParticles(boss.x, boss.y, boss.accent, 30);
+          addShake(0.4);
+          sfx('bomberExplode');
+          boss.state = 'idle';
+          boss.stateTimer = bossRest();
+        }
+      }
+    }
+
     // Pitido de aviso mientras telegrafia un ataque (va limitado por tiempo).
     if (boss.telegraph > 0) sfx('telegraph');
 
@@ -3734,7 +3801,7 @@
   }
 
   function fireChargedLaser(p) {
-    const dps = Math.max(60, p.dmg * 12) * themeAbilityDmgMul();
+    const dps = Math.max(60, p.dmg * 12) * themeAbilityDmgMul() * playerDmgMul(p);
     const fireTimer = 0.55;
     beams.push({
       x: p.x, y: p.y, angle: p.aim,
@@ -3777,7 +3844,7 @@
       meteors.push({
         x: clamp(tx, 40, LOGICAL_W - 40),
         y: clamp(ty, 40, LOGICAL_H - 40),
-        radius: 140, dmg: Math.max(40, p.dmg * 6) * themeAbilityDmgMul(), warn, maxWarn: warn, exploded: false,
+        radius: 140, dmg: Math.max(40, p.dmg * 6) * themeAbilityDmgMul() * playerDmgMul(p), warn, maxWarn: warn, exploded: false,
         color: ABILITY_META.meteor.color, owner: 'player',
       });
       sfx('meteor');
@@ -4065,7 +4132,7 @@
           x: p.x + Math.cos(a) * (p.r + 8), y: p.y + Math.sin(a) * (p.r + 8),
           vx: Math.cos(a) * (p.bulletSpeed * 1.15), vy: Math.sin(a) * (p.bulletSpeed * 1.15),
           r: style.r + 6 + pow * 10, life: life + 0.4, friendly: true,
-          dmg: oneShot ? 999999 : p.dmg * (2 + pow * 6),
+          dmg: oneShot ? 999999 : p.dmg * (2 + pow * 6) * playerDmgMul(p),
           pierce: p.pierce + 3 + Math.round(pow * 3), style: p.projectile,
           bounces: p.ricochet ? 1 : 0,
         });
@@ -4091,7 +4158,7 @@
         vx: Math.cos(a) * p.bulletSpeed,
         vy: Math.sin(a) * p.bulletSpeed,
         r: style.r, life, friendly: true,
-        dmg: oneShot ? 999999 : p.dmg,
+        dmg: oneShot ? 999999 : p.dmg * playerDmgMul(p),
         pierce: p.pierce, style: p.projectile,
         bounces: p.ricochet ? 1 : 0,
       });
@@ -4104,6 +4171,7 @@
     amount *= diff().dmg; // dificultad: todo el daño recibido por un jugador
     p.hp -= amount;
     p.noShootTimer = 0;        // recibir daño cuenta como "estar en combate"
+    p.hitFreeTimer = 0;        // pasivo 'glass': un golpe reinicia la rampa de daño
     roomHitless = false;       // sala "reto": ya no cuenta como perfecta
     p.hurtFlash = 1;
     addShake(p === me ? 0.16 : 0.06); // se nota mas cuando te toca a ti
@@ -4258,8 +4326,21 @@
     if (p.passive === 'regen') {
       p.noShootTimer = (p.noShootTimer || 0) + dt;
       if (p.noShootTimer > 2.5 && p.hp < p.maxHp) p.hp = Math.min(p.maxHp, p.hp + 7 * dt);
+    } else if (p.passive === 'glass') {
+      p.hitFreeTimer = (p.hitFreeTimer || 0) + dt;
     }
-    // 'glass' (Aguja): el +daño ya va en los stats base; sin tick.
+  }
+
+  // Multiplicador de daño de salida del jugador. Solo hace algo con el
+  // pasivo 'glass' (Aguja): rampa con el tiempo sin recibir un golpe, hasta
+  // GLASS_MAX_BONUS, y se reinicia entera en damagePlayer(). Se aplica en
+  // TODAS las fuentes de daño del jugador (disparo normal, carga, dron,
+  // laser, meteoro) para que el pasivo se sienta consistente en toda la
+  // build, no solo en el disparo basico.
+  const GLASS_RAMP_TIME = 6, GLASS_MAX_BONUS = 0.5;
+  function playerDmgMul(p) {
+    if (p.passive !== 'glass') return 1;
+    return 1 + Math.min(1, (p.hitFreeTimer || 0) / GLASS_RAMP_TIME) * GLASS_MAX_BONUS;
   }
 
   // Drones orbitando: disparan solos al enemigo mas cercano. El cliente los
@@ -4278,7 +4359,7 @@
           const ta = Math.atan2(tgt.y - dy, tgt.x - dx);
           bullets.push({
             x: dx, y: dy, vx: Math.cos(ta) * 720, vy: Math.sin(ta) * 720,
-            r: 3, life: 1.1, friendly: true, dmg: Math.max(4, p.dmg * 0.5),
+            r: 3, life: 1.1, friendly: true, dmg: Math.max(4, p.dmg * 0.5) * playerDmgMul(p),
             pierce: 0, style: p.projectile,
           });
         }
@@ -4685,6 +4766,7 @@
           angle: r2(boss.laser.angle),
           orbs: boss.laser.orbs.map(o => ({ angle: r2(o.angle), dist: r1(o.dist), r: r1(o.r) })),
         } : null,
+        gravity: boss.gravity ? { phase: boss.gravity.phase } : null,
       } : null,
       beams: beams.map(b => ({
         x: r1(b.x), y: r1(b.y), angle: r2(b.angle), width: r2(b.width),
@@ -5095,7 +5177,7 @@
           showLevelUpUI(s.levelUp.choices, true);
         }
         if (!myUpgradeSent && s.levelUp.readyMe) {
-          levelupStatus.textContent = 'Your teammate is ready — pick yours!';
+          levelupStatus.textContent = 'Tu compañero ya ha elegido — ¡elige la tuya!';
         } else if (!myUpgradeSent) {
           levelupStatus.textContent = '';
         }
@@ -5943,6 +6025,23 @@
       }
     }
 
+    // Pozo de gravedad tirando: anillos oscuros girando hacia dentro,
+    // distintos del anillo rojo de telegrafia (ese ya termino en este punto).
+    if (boss.state === 'gravityWell' && boss.gravity && boss.gravity.phase === 'pull') {
+      ctx.save();
+      ctx.translate(boss.x, boss.y);
+      for (let i = 0; i < 3; i++) {
+        const t = (performance.now() / 260 + i / 3) % 1; // 0 (lejos) -> 1 (nucleo)
+        ctx.globalAlpha = 0.5 * (1 - t);
+        ctx.strokeStyle = boss.accent;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 40 + (1 - t) * 380, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     // Cuerpo del jefe: nucleo + anillos girando.
     ctx.save();
     ctx.translate(boss.x, boss.y);
@@ -6052,7 +6151,10 @@
     adminHide();
     const diffLbl = gameDifficulty !== 'normal' ? `[${diff().label}]  ` : '';
     let sub = `${diffLbl}Puntos: ${score} - galaxia ${galaxy}, ${roomsCleared} salas superadas`;
-    if (currentRole === 'solo') {
+    // El reto diario no debe tocar stats/desbloqueos/mejor marca del perfil
+    // normal (ni pisar un checkpoint de una partida normal en curso) — solo
+    // su propio marcador del dia, que se manda aparte en showDailyBoard.
+    if (currentRole === 'solo' && !dailyMode) {
       const nuevos = Cloud.onRunEnd({ galaxy, score });
       if (nuevos && nuevos.length) {
         sub += `  ·  ¡Desbloqueado: ${nuevos.join(', ')}!`;
@@ -6110,7 +6212,9 @@
     if (!Cloud.user()) { flashAccStatus('El reto diario necesita cuenta (para puntuar).'); return; }
     saveIdentity();
     dailyMode = true;
-    Cloud.setSavedRun(null);
+    // NO se toca save.savedRun: el reto diario nunca lo escribe (serializeRun
+    // corta si dailyMode), asi que el checkpoint de la partida normal en curso
+    // sobrevive a jugar un reto diario.
     startGame('solo', { name: effectiveName(), skin: mySkin, projectile: myProjectile, ship: myShip }, null);
   });
 
@@ -6155,7 +6259,7 @@
   accPassInput.addEventListener('keydown', e => { if (e.key === 'Enter') accAuth('login'); });
 
   document.getElementById('playagain-btn').addEventListener('click', () => location.reload());
-  leaveBtn.addEventListener('click', () => { if (confirm('Leave the current match?')) location.reload(); });
+  leaveBtn.addEventListener('click', () => { if (confirm('¿Salir de la partida actual?')) location.reload(); });
 
   document.getElementById('host-btn').addEventListener('click', () => {
     if (typeof Peer === 'undefined') { alert('Multiplayer needs an internet connection (to load the connection library). Check your connection and reload the page.'); return; }
@@ -6225,7 +6329,7 @@
         peer.destroy();
         tryHost(attemptsLeft - 1);
       } else {
-        hostStatus.textContent = 'Could not create a room. Please try again.';
+        hostStatus.textContent = 'No se pudo crear la sala. Inténtalo de nuevo.';
       }
     });
   }
